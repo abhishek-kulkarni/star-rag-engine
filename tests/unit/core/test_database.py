@@ -1,5 +1,6 @@
-from app.core.database import get_db
 from sqlalchemy.orm import Session
+
+from app.core.database import get_db
 
 
 def test_get_db_yields_session():
