@@ -1,0 +1,36 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+*.pyc
+
+# Virtual environments
+.venv
+
+# Local Database & Cache Volumes (Docker)
+/pgdata/
+/redisdata/
+/miniodata/
+
+# Private Test Data & Artifacts
+/data/*
+!/data/.gitkeep
+
+# Environment variables
+.env
+.env.*
+
+# Tool caches & Reports
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+
+# IDE & OS files
+.vscode/
+.idea/
+.DS_Store
