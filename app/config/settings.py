@@ -20,8 +20,9 @@ class Settings(BaseSettings):
     MINIO_ROOT_PASSWORD: str = "minioadmin"
     MINIO_SECURE: bool = False
 
-    # AI Provider
+    # AI & Security
     GEMINI_API_KEY: str = "your_api_key_here"
+    PII_CONFIDENCE_THRESHOLD: float = 0.4
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

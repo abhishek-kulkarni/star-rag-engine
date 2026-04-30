@@ -1,5 +1,6 @@
 import io
 
+import anyio
 from minio import Minio
 
 from app.config.settings import settings
@@ -29,7 +30,13 @@ class StorageService:
         if not self.client.bucket_exists(self.bucket_name):
             self.client.make_bucket(self.bucket_name)
 
-    async def upload_file(self, filename: str, content: bytes, user_id: str) -> str:
+    async def upload_file(
+        self,
+        filename: str,
+        content: bytes,
+        user_id: str,
+        content_type: str = "application/octet-stream",
+    ) -> str:
         """
         Uploads a file to MinIO under a user-specific prefix.
         Returns the MinIO URI.
@@ -37,16 +44,19 @@ class StorageService:
         object_name = f"{user_id}/{filename}"
         content_stream = io.BytesIO(content)
 
-        self.client.put_object(
+        # Offload synchronous MinIO I/O to a separate thread pool
+        await anyio.to_thread.run_sync(
+            self.client.put_object,
             self.bucket_name,
             object_name,
             content_stream,
-            length=len(content),
+            len(content),
+            content_type,
         )
 
         return f"minio://{self.bucket_name}/{object_name}"
 
-    def delete_file(self, minio_uri: str):
+    async def delete_file(self, minio_uri: str):
         """
         Deletes a file from MinIO given its URI.
         """
@@ -54,7 +64,11 @@ class StorageService:
             return
 
         object_name = minio_uri.replace(f"minio://{self.bucket_name}/", "")
-        self.client.remove_object(self.bucket_name, object_name)
+
+        # Offload synchronous MinIO I/O to a separate thread pool
+        await anyio.to_thread.run_sync(
+            self.client.remove_object, self.bucket_name, object_name
+        )
 
 
 storage_service = StorageService()

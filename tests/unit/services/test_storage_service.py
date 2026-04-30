@@ -16,31 +16,38 @@ async def test_upload_file(monkeypatch):
     service.client = MagicMock()
 
     mock_data = b"test content"
-    uri = await service.upload_file("test.pdf", mock_data, "user_123")
+    uri = await service.upload_file(
+        "test.pdf", mock_data, "user_123", content_type="application/pdf"
+    )
 
     assert "user_123/test.pdf" in uri
-    service.client.put_object.assert_called_once()
+    # Check that put_object was called with the correct content_type
+    # (last positional arg)
+    args, kwargs = service.client.put_object.call_args
+    assert args[4] == "application/pdf"
 
 
-def test_delete_file(monkeypatch):
+@pytest.mark.asyncio
+async def test_delete_file(monkeypatch):
     service = StorageService()
     service.client = MagicMock()
 
     uri = "minio://star-rag-documents/user_123/test.pdf"
-    service.delete_file(uri)
+    await service.delete_file(uri)
 
     service.client.remove_object.assert_called_once_with(
         "star-rag-documents", "user_123/test.pdf"
     )
 
 
-def test_delete_file_invalid_uri(monkeypatch):
+@pytest.mark.asyncio
+async def test_delete_file_invalid_uri(monkeypatch):
     service = StorageService()
     service.client = MagicMock()
 
     # URI from another bucket or invalid format
     uri = "minio://other-bucket/user_123/test.pdf"
-    service.delete_file(uri)
+    await service.delete_file(uri)
 
     service.client.remove_object.assert_not_called()
 
