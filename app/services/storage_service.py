@@ -56,6 +56,25 @@ class StorageService:
 
         return f"minio://{self.bucket_name}/{object_name}"
 
+    async def download_file(self, minio_uri: str) -> bytes:
+        """
+        Retrieves a file's bytes from MinIO given its URI.
+        """
+        if not minio_uri.startswith(f"minio://{self.bucket_name}/"):
+            raise ValueError(f"Invalid MinIO URI: {minio_uri}")
+
+        object_name = minio_uri.replace(f"minio://{self.bucket_name}/", "")
+
+        # Offload synchronous MinIO I/O to a separate thread pool
+        response = await anyio.to_thread.run_sync(
+            self.client.get_object, self.bucket_name, object_name
+        )
+        try:
+            return response.read()
+        finally:
+            response.close()
+            response.release_conn()
+
     async def delete_file(self, minio_uri: str):
         """
         Deletes a file from MinIO given its URI.

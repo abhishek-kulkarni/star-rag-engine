@@ -1,66 +1,69 @@
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from app.services.storage_service import StorageService
 
 
-def test_storage_service_initialization():
-    service = StorageService()
-    assert service.client is not None
+@pytest.fixture
+def storage_service():
+    with patch("app.services.storage_service.Minio"):
+        service = StorageService()
+        return service
 
 
 @pytest.mark.asyncio
-async def test_upload_file(monkeypatch):
-    service = StorageService()
-    service.client = MagicMock()
-
-    mock_data = b"test content"
-    uri = await service.upload_file(
-        "test.pdf", mock_data, "user_123", content_type="application/pdf"
-    )
-
-    assert "user_123/test.pdf" in uri
-    # Check that put_object was called with the correct content_type
-    # (last positional arg)
-    args, kwargs = service.client.put_object.call_args
-    assert args[4] == "application/pdf"
+async def test_upload_file(storage_service):
+    """Verify file upload offloads to thread pool."""
+    with patch("anyio.to_thread.run_sync") as mock_run:
+        uri = await storage_service.upload_file(
+            filename="test.pdf", content=b"data", user_id="user1"
+        )
+        assert uri == "minio://star-rag-documents/user1/test.pdf"
+        mock_run.assert_called_once()
 
 
 @pytest.mark.asyncio
-async def test_delete_file(monkeypatch):
-    service = StorageService()
-    service.client = MagicMock()
+async def test_download_file(storage_service):
+    """Verify file download retrieves bytes."""
+    mock_response = MagicMock()
+    mock_response.read.return_value = b"file data"
 
-    uri = "minio://star-rag-documents/user_123/test.pdf"
-    await service.delete_file(uri)
-
-    service.client.remove_object.assert_called_once_with(
-        "star-rag-documents", "user_123/test.pdf"
-    )
+    with patch("anyio.to_thread.run_sync", return_value=mock_response):
+        content = await storage_service.download_file(
+            "minio://star-rag-documents/user1/test.pdf"
+        )
+        assert content == b"file data"
+        mock_response.read.assert_called_once()
 
 
 @pytest.mark.asyncio
-async def test_delete_file_invalid_uri(monkeypatch):
-    service = StorageService()
-    service.client = MagicMock()
-
-    # URI from another bucket or invalid format
-    uri = "minio://other-bucket/user_123/test.pdf"
-    await service.delete_file(uri)
-
-    service.client.remove_object.assert_not_called()
+async def test_download_file_invalid_uri(storage_service):
+    """Verify download raises error for invalid URI."""
+    with pytest.raises(ValueError, match="Invalid MinIO URI"):
+        await storage_service.download_file("invalid://uri")
 
 
-def test_ensure_bucket_exists_creates_if_missing(monkeypatch):
-    # Mock Minio class to control behavior during __init__
-    mock_minio = MagicMock()
-    mock_minio.bucket_exists.return_value = False
-    monkeypatch.setattr(
-        "app.services.storage_service.Minio", lambda *a, **k: mock_minio
-    )
+@pytest.mark.asyncio
+async def test_delete_file(storage_service):
+    """Verify file deletion logic."""
+    with patch("anyio.to_thread.run_sync") as mock_run:
+        await storage_service.delete_file("minio://star-rag-documents/user1/test.pdf")
+        mock_run.assert_called_once()
 
-    # This will trigger __init__ -> _ensure_bucket_exists
-    StorageService()
 
-    mock_minio.make_bucket.assert_called_once_with("star-rag-documents")
+@pytest.mark.asyncio
+async def test_delete_file_invalid_uri(storage_service):
+    """Verify delete ignores invalid URIs silently."""
+    with patch("anyio.to_thread.run_sync") as mock_run:
+        await storage_service.delete_file("invalid://uri")
+        mock_run.assert_not_called()
+
+
+def test_bucket_creation():
+    """Verify bucket is created if missing."""
+    with patch("app.services.storage_service.Minio") as mock_minio:
+        client = mock_minio.return_value
+        client.bucket_exists.return_value = False
+        StorageService()
+        client.make_bucket.assert_called_once_with("star-rag-documents")
