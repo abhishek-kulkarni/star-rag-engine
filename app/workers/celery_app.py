@@ -17,7 +17,14 @@ celery_app.conf.update(
     result_serializer="json",
     timezone="UTC",
     enable_utc=True,
-    # Dead Letter Queue (DLQ) strategy for failing tasks
+    # Reliability: Task acknowledgment and retries
     task_acks_late=True,
     task_reject_on_worker_lost=True,
+    # Queue Configuration
+    task_default_queue="default",
+    task_queues={
+        "default": {"exchange": "default", "routing_key": "default"},
+        "ingestion": {"exchange": "ingestion", "routing_key": "ingestion"},
+        "dead_letter": {"exchange": "dead_letter", "routing_key": "dead_letter"},
+    },
 )

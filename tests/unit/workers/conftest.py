@@ -26,8 +26,12 @@ def mock_db_session():
         mock_storage.download_file = MagicMock(return_value=b"test data")
         mock_storage.upload_file = MagicMock(return_value="minio://test")
 
-        # Mocking the query chain
-        session.query.return_value.filter.return_value.first.return_value = MagicMock()
+        # Mocking the query chain with specs to prevent delusional mocks
+        from app.models.document import IngestionJob
+
+        session.query.return_value.filter.return_value.first.return_value = MagicMock(
+            spec=IngestionJob
+        )
         session.query.return_value.filter.return_value.all.return_value = []
 
         yield session

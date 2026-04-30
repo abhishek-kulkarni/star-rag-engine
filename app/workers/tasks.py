@@ -1,7 +1,7 @@
 import asyncio
 from datetime import UTC, datetime
 
-from celery import chain  # type: ignore
+from celery import Task, chain  # type: ignore
 
 from app.core.database import SessionLocal
 from app.models.document import Document, DocumentChunk, IngestionJob, JobStatus
@@ -40,7 +40,32 @@ def update_job_status(job_id: int, status: JobStatus, error: str | None = None):
             db.commit()
 
 
-@celery_app.task(name="app.workers.tasks.parse_task")
+class BaseIngestionTask(Task):
+    """
+    Base task for all ingestion stages.
+    Automatically handles DB updates and DLQ routing on failure.
+    """
+
+    def on_failure(self, exc, task_id, args, kwargs, einfo):
+        # Determine job_id from args
+        # In our chain, args[0] is usually the dictionary containing job_id
+        job_id = None
+        if args and isinstance(args[0], dict):
+            job_id = args[0].get("job_id")
+        elif args and isinstance(args[0], int):
+            # Fallback for direct job_id passing
+            job_id = args[0]
+
+        if job_id:
+            update_job_status(job_id, JobStatus.FAILED, str(exc))
+
+        # Quarantine the failed task payload in the DLQ for manual inspection
+        self.apply_async(args=args, kwargs=kwargs, queue="dead_letter", priority=0)
+
+
+@celery_app.task(
+    name="app.workers.tasks.parse_task", base=BaseIngestionTask, queue="ingestion"
+)
 def parse_task(data: dict):
     """Downloads PDF, extracts text, and saves text back to storage."""
     job_id = data["job_id"]
@@ -54,7 +79,7 @@ def parse_task(data: dict):
                 raise ValueError(f"Document {document_id} not found")
 
             # Download raw PDF
-            content = asyncio.run(storage_service.download_file(doc.storage_uri))
+            content = asyncio.run(storage_service.download_file(doc.minio_raw_uri))
 
             # Extract text
             text = parser_service.parse_pdf(content)
@@ -65,7 +90,7 @@ def parse_task(data: dict):
                 storage_service.upload_file(
                     filename=text_filename,
                     content=text.encode("utf-8"),
-                    user_id=str(doc.owner_id),
+                    user_id=str(doc.user_id),
                     content_type="text/plain",
                 )
             )
@@ -74,14 +99,16 @@ def parse_task(data: dict):
                 "job_id": job_id,
                 "document_id": document_id,
                 "text_uri": text_uri,
-                "owner_id": doc.owner_id,
+                "user_id": doc.user_id,
             }
-    except Exception as e:
-        update_job_status(job_id, JobStatus.FAILED, str(e))
+    except Exception:
+        # on_failure handles status update and re-raising
         raise
 
 
-@celery_app.task(name="app.workers.tasks.chunk_task")
+@celery_app.task(
+    name="app.workers.tasks.chunk_task", base=BaseIngestionTask, queue="ingestion"
+)
 def chunk_task(data: dict):
     """Downloads text, chunks it, and persists chunks (no vectors yet)."""
     job_id = data["job_id"]
@@ -116,12 +143,13 @@ def chunk_task(data: dict):
             db.commit()
 
         return {"job_id": job_id, "document_id": document_id}
-    except Exception as e:
-        update_job_status(job_id, JobStatus.FAILED, str(e))
+    except Exception:
         raise
 
 
-@celery_app.task(name="app.workers.tasks.embed_task")
+@celery_app.task(
+    name="app.workers.tasks.embed_task", base=BaseIngestionTask, queue="ingestion"
+)
 def embed_task(data: dict):
     """Fetches chunks from DB, generates vectors, and updates DB."""
     job_id = data["job_id"]
@@ -150,8 +178,7 @@ def embed_task(data: dict):
 
         update_job_status(job_id, JobStatus.COMPLETED)
         return True
-    except Exception as e:
-        update_job_status(job_id, JobStatus.FAILED, str(e))
+    except Exception:
         raise
 
 
@@ -159,4 +186,4 @@ def start_ingestion_pipeline(job_id: int, document_id: int):
     """Orchestrates the hardened ingestion chain."""
     payload = {"job_id": job_id, "document_id": document_id}
     pipeline = chain(parse_task.s(payload) | chunk_task.s() | embed_task.s())
-    return pipeline.apply_async()
+    return pipeline.apply_async(queue="ingestion")
