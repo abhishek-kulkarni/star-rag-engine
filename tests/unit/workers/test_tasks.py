@@ -190,6 +190,36 @@ def test_the_sweeper_logic(mock_db_session):
     assert mock_job.status == JobStatus.FAILED
 
 
+def test_vector_index_maintenance_success(mock_db_session):
+    """Verify vector index maintenance executes with AUTOCOMMIT."""
+    from app.workers.beat_tasks import vector_index_maintenance
+
+    with patch("app.workers.beat_tasks.engine") as mock_engine:
+        mock_conn_options = (
+            mock_engine.connect.return_value.execution_options.return_value
+        )
+        mock_conn = mock_conn_options.__enter__.return_value
+        result = vector_index_maintenance()
+
+        assert result is True
+        mock_engine.connect.assert_called_once()
+        # Verify isolation level requirement
+        mock_engine.connect.return_value.execution_options.assert_called_with(
+            isolation_level="AUTOCOMMIT"
+        )
+        mock_conn.execute.assert_called_once()
+
+
+def test_vector_index_maintenance_failure(mock_db_session):
+    """Verify vector index maintenance handles SQL errors gracefully."""
+    from app.workers.beat_tasks import vector_index_maintenance
+
+    with patch("app.workers.beat_tasks.engine") as mock_engine:
+        mock_engine.connect.side_effect = Exception("DB Maintenance error")
+        result = vector_index_maintenance()
+        assert result is False
+
+
 def test_start_ingestion_pipeline():
     """Verify the pipeline orchestrator creates a Celery chain with ingestion queue."""
     with patch("app.workers.tasks.chain") as mock_chain:

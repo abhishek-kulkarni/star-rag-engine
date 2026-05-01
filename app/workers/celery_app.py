@@ -28,3 +28,15 @@ celery_app.conf.update(
         "dead_letter": {"exchange": "dead_letter", "routing_key": "dead_letter"},
     },
 )
+
+# Periodic Task Scheduling (Celery Beat)
+celery_app.conf.beat_schedule = {
+    "the-sweeper-every-30-mins": {
+        "task": "app.workers.beat_tasks.the_sweeper",
+        "schedule": 1800.0,  # 30 minutes
+    },
+    "vector-index-maintenance-weekly": {
+        "task": "app.workers.beat_tasks.vector_index_maintenance",
+        "schedule": 604800.0,  # 7 days
+    },
+}
