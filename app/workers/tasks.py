@@ -184,11 +184,13 @@ def chunk_task(data: dict):
 
 
 @celery_app.task(
+    bind=True,
     name="app.workers.tasks.embed_task",
     base=BaseIngestionTask,
     queue=settings.CELERY_INGESTION_QUEUE,
+    max_retries=10,
 )
-def embed_task(data: dict):
+def embed_task(self, data: dict):
     """Fetches chunks from DB, generates vectors, and updates DB."""
     job_id = data["job_id"]
     document_id = data["document_id"]
@@ -214,26 +216,43 @@ def embed_task(data: dict):
                 chunks = query.all()
 
                 if chunks:
-                    # 1. Extract all text content into a single list
-                    chunk_texts = [chunk.text_content for chunk in chunks]
+                    # Batch processing to avoid payload size limits.
+                    batch_size = 10
 
-                    # 2. Call the LLM API exactly once for the entire batch (sync)
-                    try:
-                        vectors = llm.get_embeddings_batch_sync(chunk_texts)
-                    except Exception:
-                        telemetry.llm_errors.labels(model="embed").inc()
-                        raise
+                    for i in range(0, len(chunks), batch_size):
+                        batch_chunks = chunks[i : i + batch_size]
+                        batch_texts = [c.text_content for c in batch_chunks]
 
-                    # 3. Zip the returned vectors back to the SQLAlchemy objects
-                    for chunk, vector in zip(chunks, vectors, strict=True):
-                        chunk.embedding = vector
+                        try:
+                            vectors = llm.get_embeddings_batch_sync(batch_texts)
 
-                db.commit()
+                            # Guard against the API dropping vectors silently
+                            if len(vectors) != len(batch_texts):
+                                raise ValueError(
+                                    f"API returned {len(vectors)} vectors "
+                                    f"for {len(batch_texts)} chunks."
+                                )
+
+                        except Exception as e:
+                            telemetry.llm_errors.labels(model="embed").inc()
+                            # Yield the worker back to the pool with exponential backoff
+                            # Formula: 2^retries * 5s (e.g. 5s, 10s, 20s...)
+                            backoff = (2**self.request.retries) * 5
+                            raise self.retry(exc=e, countdown=backoff) from e
+
+                        # Zip the returned vectors back to the SQLAlchemy objects
+                        for chunk, vector in zip(batch_chunks, vectors, strict=True):
+                            chunk.embedding = vector
+
+                        # Commit incrementally! If we hit a 429 on the next batch,
+                        # the successful chunks are saved and won't be re-processed.
+                        db.commit()
+
         except Exception as e:
             # If it's already been tracked as an LLM error, don't double count
             # as a postgres error unless it's actually a DB failure.
             # However, for simplicity, we let the inner raises handle it.
-            if "telemetry" not in str(e):  # Avoid double counting if already raised
+            if "telemetry" not in str(e) and not isinstance(e, self.retry.__class__):
                 # If we didn't raise from LLM block, it might be a DB block failure
                 pass
             raise

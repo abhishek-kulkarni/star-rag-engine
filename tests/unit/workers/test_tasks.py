@@ -357,3 +357,30 @@ def test_start_ingestion_pipeline():
         start_ingestion_pipeline(1, 10)
         mock_chain.assert_called_once()
         mock_chain.return_value.apply_async.assert_called_with(queue="ingestion")
+
+
+def test_embed_task_mismatched_vectors(mock_db_session):
+    """Verify embed_task triggers retry if API returns fewer vectors than chunks."""
+    data = {"job_id": 1, "document_id": 10, "user_id": "user_123"}
+    chunk1 = MagicMock(spec=DocumentChunk)
+    chunk1.text_content = "text 1"
+
+    # Mock the chain of filters for the query
+    mock_query = mock_db_session.query.return_value
+    mock_query.filter.return_value.filter.return_value.all.return_value = [chunk1]
+
+    mock_llm = MagicMock()
+    # API returns 0 vectors for 1 chunk
+    mock_llm.get_embeddings_batch_sync.return_value = []
+
+    with (
+        patch("app.workers.tasks.get_llm_service", return_value=mock_llm),
+        patch("app.workers.tasks.update_job_status"),
+        patch.object(embed_task, "retry", side_effect=Exception("Retry Triggered")),
+    ):
+        # We call the task directly since we're patching the
+        # task object's retry method.
+        with pytest.raises(Exception, match="Retry Triggered"):
+            embed_task(data)
+
+        mock_llm.get_embeddings_batch_sync.assert_called_once()
