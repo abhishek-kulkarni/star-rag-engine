@@ -2,12 +2,18 @@ from fastapi import FastAPI
 from prometheus_client import make_asgi_app
 
 from app.api.v1.endpoints import documents, query
+from app.config.settings import settings
 from app.core.logging import setup_logging
+from app.core.security import get_current_user
 
 # 1. Initialize Structured Logging
 setup_logging()
 
 app = FastAPI(title="STAR RAG Engine")
+
+# Bypass Auth for local testing
+if settings.ENVIRONMENT == "local":
+    app.dependency_overrides[get_current_user] = lambda: "eval_user"
 
 # 2. Expose Prometheus Metrics endpoint
 metrics_app = make_asgi_app()
