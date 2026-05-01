@@ -11,6 +11,10 @@ def ensure_user_partition(db: Session, user_id: str) -> None:
     """
     Dynamically creates a PostgreSQL partition for a specific user if it doesn't exist.
     Uses strict DDL sanitization to prevent SQL injection.
+
+    WARNING: This function calls db.commit() to finalize DDL.
+    Ensure this is called at the START of a session or in an isolated session
+    to avoid prematurely committing other pending data changes.
     """
     # Strict validation: only alphanumeric characters, underscores, and hyphens allowed.
     if not re.match(r"^[a-zA-Z0-9_-]+$", user_id):
