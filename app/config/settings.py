@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     @computed_field
+    @property
     def sqlalchemy_database_uri(self) -> str:
         """Dynamically constructs the database connection string for SQLAlchemy."""
         # Note: Swap 'psycopg' with 'asyncpg' if using the async SQLAlchemy engine

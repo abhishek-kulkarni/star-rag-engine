@@ -29,9 +29,8 @@ def ensure_user_partition(db: Session, user_id: str) -> None:
     db.execute(
         text(
             f"CREATE TABLE IF NOT EXISTS {partition_name} "
-            "PARTITION OF document_chunks FOR VALUES IN (:uid);"
-        ),
-        {"uid": user_id},
+            f"PARTITION OF document_chunks FOR VALUES IN ('{user_id}');"
+        )
     )
     db.commit()
 

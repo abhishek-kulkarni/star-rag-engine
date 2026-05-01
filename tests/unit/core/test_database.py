@@ -28,11 +28,9 @@ def test_ensure_user_partition_valid():
     db.execute.assert_called_once()
     args, kwargs = db.execute.call_args
     sql = args[0].text
-    params = args[1]
 
-    assert "document_chunks_user_123" in sql
-    assert "FOR VALUES IN (:uid)" in sql
-    assert params["uid"] == user_id
+    assert f"document_chunks_{user_id.replace('-', '_')}" in sql
+    assert f"FOR VALUES IN ('{user_id}')" in sql
     db.commit.assert_called_once()
 
 
