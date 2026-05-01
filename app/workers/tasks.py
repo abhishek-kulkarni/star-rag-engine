@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 
 from celery import Task, chain  # type: ignore
 
+from app.config.settings import settings
 from app.core.database import SessionLocal, ensure_user_partition
 from app.models.document import Document, DocumentChunk, IngestionJob, JobStatus
 from app.services.llm_service import LLMService
@@ -60,11 +61,15 @@ class BaseIngestionTask(Task):
             update_job_status(job_id, JobStatus.FAILED, str(exc))
 
         # Quarantine the failed task payload in the DLQ for manual inspection
-        self.apply_async(args=args, kwargs=kwargs, queue="dead_letter", priority=0)
+        self.apply_async(
+            args=args, kwargs=kwargs, queue=settings.CELERY_DLQ_NAME, priority=0
+        )
 
 
 @celery_app.task(
-    name="app.workers.tasks.parse_task", base=BaseIngestionTask, queue="ingestion"
+    name="app.workers.tasks.parse_task",
+    base=BaseIngestionTask,
+    queue=settings.CELERY_INGESTION_QUEUE,
 )
 def parse_task(data: dict):
     """Downloads PDF, extracts text, and saves text back to storage."""
@@ -107,7 +112,9 @@ def parse_task(data: dict):
 
 
 @celery_app.task(
-    name="app.workers.tasks.chunk_task", base=BaseIngestionTask, queue="ingestion"
+    name="app.workers.tasks.chunk_task",
+    base=BaseIngestionTask,
+    queue=settings.CELERY_INGESTION_QUEUE,
 )
 def chunk_task(data: dict):
     """Downloads text, chunks it, and persists chunks (no vectors yet)."""
@@ -155,7 +162,9 @@ def chunk_task(data: dict):
 
 
 @celery_app.task(
-    name="app.workers.tasks.embed_task", base=BaseIngestionTask, queue="ingestion"
+    name="app.workers.tasks.embed_task",
+    base=BaseIngestionTask,
+    queue=settings.CELERY_INGESTION_QUEUE,
 )
 def embed_task(data: dict):
     """Fetches chunks from DB, generates vectors, and updates DB."""

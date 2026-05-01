@@ -20,7 +20,7 @@ class StorageService:
             secret_key=settings.MINIO_ROOT_PASSWORD,
             secure=settings.MINIO_SECURE,
         )
-        self.bucket_name = "star-rag-documents"
+        self.bucket_name = settings.MINIO_BUCKET_NAME
         self._ensure_bucket_exists()
 
     def _ensure_bucket_exists(self):

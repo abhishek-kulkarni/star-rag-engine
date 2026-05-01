@@ -2,6 +2,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from app.config.settings import settings
 from app.models.document import Document, DocumentChunk, IngestionJob, JobStatus
 from app.workers.tasks import (
     BaseIngestionTask,
@@ -26,7 +27,7 @@ def test_base_task_on_failure(mock_db_session):
         task.on_failure(exc, "task-id", args, {}, None)
         mock_update.assert_called_once_with(1, JobStatus.FAILED, "Task failed")
         mock_apply.assert_called_once_with(
-            args=args, kwargs={}, queue="dead_letter", priority=0
+            args=args, kwargs={}, queue=settings.CELERY_DLQ_NAME, priority=0
         )
 
 

@@ -21,11 +21,20 @@ celery_app.conf.update(
     task_acks_late=True,
     task_reject_on_worker_lost=True,
     # Queue Configuration
-    task_default_queue="default",
+    task_default_queue=settings.CELERY_DEFAULT_QUEUE,
     task_queues={
-        "default": {"exchange": "default", "routing_key": "default"},
-        "ingestion": {"exchange": "ingestion", "routing_key": "ingestion"},
-        "dead_letter": {"exchange": "dead_letter", "routing_key": "dead_letter"},
+        settings.CELERY_DEFAULT_QUEUE: {
+            "exchange": settings.CELERY_DEFAULT_QUEUE,
+            "routing_key": settings.CELERY_DEFAULT_QUEUE,
+        },
+        settings.CELERY_INGESTION_QUEUE: {
+            "exchange": settings.CELERY_INGESTION_QUEUE,
+            "routing_key": settings.CELERY_INGESTION_QUEUE,
+        },
+        settings.CELERY_DLQ_NAME: {
+            "exchange": settings.CELERY_DLQ_NAME,
+            "routing_key": settings.CELERY_DLQ_NAME,
+        },
     },
 )
 

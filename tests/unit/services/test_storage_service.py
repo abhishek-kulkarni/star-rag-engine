@@ -2,6 +2,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from app.config.settings import settings
 from app.services.storage_service import StorageService
 
 
@@ -19,7 +20,7 @@ async def test_upload_file(storage_service):
         uri = await storage_service.upload_file(
             filename="test.pdf", content=b"data", user_id="user1"
         )
-        assert uri == "minio://star-rag-documents/user1/test.pdf"
+        assert uri == f"minio://{settings.MINIO_BUCKET_NAME}/user1/test.pdf"
         mock_run.assert_called_once()
 
 
@@ -31,7 +32,7 @@ async def test_download_file(storage_service):
 
     with patch("anyio.to_thread.run_sync", return_value=mock_response):
         content = await storage_service.download_file(
-            "minio://star-rag-documents/user1/test.pdf"
+            f"minio://{settings.MINIO_BUCKET_NAME}/user1/test.pdf"
         )
         assert content == b"file data"
         mock_response.read.assert_called_once()
@@ -48,7 +49,9 @@ async def test_download_file_invalid_uri(storage_service):
 async def test_delete_file(storage_service):
     """Verify file deletion logic."""
     with patch("anyio.to_thread.run_sync") as mock_run:
-        await storage_service.delete_file("minio://star-rag-documents/user1/test.pdf")
+        await storage_service.delete_file(
+            f"minio://{settings.MINIO_BUCKET_NAME}/user1/test.pdf"
+        )
         mock_run.assert_called_once()
 
 
@@ -66,4 +69,4 @@ def test_bucket_creation():
         client = mock_minio.return_value
         client.bucket_exists.return_value = False
         StorageService()
-        client.make_bucket.assert_called_once_with("star-rag-documents")
+        client.make_bucket.assert_called_once_with(settings.MINIO_BUCKET_NAME)

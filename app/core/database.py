@@ -34,7 +34,7 @@ def ensure_user_partition(db: Session, user_id: str) -> None:
 
 # For unit testing without a real DB, we use a sqlite in-memory for basic session tests
 # or we can mock it. Since Phase 1 is infrastructure, we'll setup the real URL.
-DATABASE_URL = f"postgresql+psycopg://{settings.POSTGRES_USER}:{settings.POSTGRES_PASSWORD}@{settings.POSTGRES_HOST}:{settings.POSTGRES_PORT}/{settings.POSTGRES_DB}"
+DATABASE_URL = settings.sqlalchemy_database_uri
 
 # We use create_engine for the actual implementation
 engine = create_engine(DATABASE_URL)
