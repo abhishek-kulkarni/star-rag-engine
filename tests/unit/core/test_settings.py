@@ -18,3 +18,4 @@ def test_settings_default_values():
     assert settings.REDIS_URL == "redis://redis:6379/0"
     assert settings.CELERY_DEFAULT_QUEUE == "default"
     assert settings.CELERY_INGESTION_QUEUE == "ingestion"
+    assert "postgresql+psycopg://" in settings.sqlalchemy_database_uri

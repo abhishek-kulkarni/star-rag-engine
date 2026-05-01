@@ -89,5 +89,40 @@ class StorageService:
             self.client.remove_object, self.bucket_name, object_name
         )
 
+    # ---------------------------------------------------------
+    # SYNCHRONOUS METHODS (Used by Celery Workers in Phase 3)
+    # ---------------------------------------------------------
+    def download_file_sync(self, minio_uri: str) -> bytes:
+        """Called directly by the synchronous Celery tasks."""
+        if not minio_uri.startswith(f"minio://{self.bucket_name}/"):
+            raise ValueError(f"Invalid MinIO URI: {minio_uri}")
+
+        object_name = minio_uri.replace(f"minio://{self.bucket_name}/", "")
+        response = self.client.get_object(self.bucket_name, object_name)
+        try:
+            return response.read()
+        finally:
+            response.close()
+            response.release_conn()
+
+    def upload_file_sync(
+        self,
+        filename: str,
+        content: bytes,
+        user_id: str,
+        content_type: str = "application/octet-stream",
+    ) -> str:
+        """Synchronous version of upload_file for Celery tasks."""
+        object_name = f"{user_id}/{filename}"
+        content_stream = io.BytesIO(content)
+        self.client.put_object(
+            self.bucket_name,
+            object_name,
+            content_stream,
+            len(content),
+            content_type=content_type,
+        )
+        return f"minio://{self.bucket_name}/{object_name}"
+
 
 storage_service = StorageService()

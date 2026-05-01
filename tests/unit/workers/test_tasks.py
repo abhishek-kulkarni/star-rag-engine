@@ -92,12 +92,12 @@ def test_parse_task_logic(mock_db_session):
     mock_db_session.query.return_value.filter.return_value.first.return_value = mock_doc
 
     with (
-        patch("app.workers.tasks.storage_service.download_file"),
+        patch("app.workers.tasks.storage_service.download_file_sync") as mock_download,
         patch("app.workers.tasks.parser_service.parse_pdf") as mock_parse,
-        patch("app.workers.tasks.storage_service.upload_file"),
-        patch("app.workers.tasks.asyncio.run") as mock_run,
+        patch("app.workers.tasks.storage_service.upload_file_sync") as mock_upload,
     ):
-        mock_run.side_effect = [b"pdf bytes", "minio://text"]
+        mock_download.return_value = b"pdf bytes"
+        mock_upload.return_value = "minio://text"
         mock_parse.return_value = "extracted text"
         result = parse_task(data)
         assert result["text_uri"] == "minio://text"
@@ -113,13 +113,15 @@ def test_chunk_task_logic(mock_db_session):
         "user_id": "user_123",
     }
     with (
-        patch("app.workers.tasks.storage_service.download_file"),
+        patch("app.workers.tasks.storage_service.download_file_sync") as mock_download,
         patch("app.workers.tasks.parser_service.split_text") as mock_split,
-        patch("app.workers.tasks.asyncio.run") as mock_run,
+        patch("app.workers.tasks.asyncio.run"),
         patch("app.workers.tasks.ensure_user_partition") as mock_ensure,
     ):
-        mock_run.return_value = b"text bytes"
+        mock_download.return_value = b"text bytes"
         mock_split.return_value = ["chunk 1", "chunk 2"]
+        # asyncio.run is still used for update_job_status
+        # or other things if they are async but here we mainly mock the download
         result = chunk_task(data)
         assert result["document_id"] == 10
         assert result["user_id"] == "user_123"
@@ -176,7 +178,8 @@ def test_chunk_task_failure(mock_db_session):
     }
     with patch("app.workers.tasks.update_job_status"):
         with patch(
-            "app.workers.tasks.asyncio.run", side_effect=Exception("Storage error")
+            "app.workers.tasks.storage_service.download_file_sync",
+            side_effect=Exception("Storage error"),
         ):
             with pytest.raises(Exception, match="Storage error"):
                 chunk_task(data)

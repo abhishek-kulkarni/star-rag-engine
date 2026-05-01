@@ -84,20 +84,18 @@ def parse_task(data: dict):
                 raise ValueError(f"Document {document_id} not found")
 
             # Download raw PDF
-            content = asyncio.run(storage_service.download_file(doc.minio_raw_uri))
+            content = storage_service.download_file_sync(doc.minio_raw_uri)
 
             # Extract text
             text = parser_service.parse_pdf(content)
 
             # Save extracted text to storage (Claim Check)
             text_filename = f"parsed_{document_id}.txt"
-            text_uri = asyncio.run(
-                storage_service.upload_file(
-                    filename=text_filename,
-                    content=text.encode("utf-8"),
-                    user_id=str(doc.user_id),
-                    content_type="text/plain",
-                )
+            text_uri = storage_service.upload_file_sync(
+                filename=text_filename,
+                content=text.encode("utf-8"),
+                user_id=str(doc.user_id),
+                content_type="text/plain",
             )
 
             return {
@@ -125,7 +123,7 @@ def chunk_task(data: dict):
 
     try:
         # Download extracted text
-        text_bytes = asyncio.run(storage_service.download_file(text_uri))
+        text_bytes = storage_service.download_file_sync(text_uri)
         text = text_bytes.decode("utf-8")
 
         # Semantic splitting

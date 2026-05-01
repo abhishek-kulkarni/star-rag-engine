@@ -70,3 +70,33 @@ def test_bucket_creation():
         client.bucket_exists.return_value = False
         StorageService()
         client.make_bucket.assert_called_once_with(settings.MINIO_BUCKET_NAME)
+
+
+def test_download_file_sync(storage_service):
+    """Verify synchronous file download retrieves bytes."""
+    mock_response = MagicMock()
+    mock_response.read.return_value = b"sync file data"
+
+    # Accessing the client via the patched storage_service fixture
+    storage_service.client.get_object.return_value = mock_response
+
+    content = storage_service.download_file_sync(
+        f"minio://{settings.MINIO_BUCKET_NAME}/user1/test.pdf"
+    )
+    assert content == b"sync file data"
+    storage_service.client.get_object.assert_called_once()
+
+
+def test_download_file_sync_invalid_uri(storage_service):
+    """Verify synchronous download raises error for invalid URI."""
+    with pytest.raises(ValueError, match="Invalid MinIO URI"):
+        storage_service.download_file_sync("invalid://uri")
+
+
+def test_upload_file_sync(storage_service):
+    """Verify synchronous file upload returns correct URI."""
+    uri = storage_service.upload_file_sync(
+        filename="sync.txt", content=b"sync data", user_id="user1"
+    )
+    assert uri == f"minio://{settings.MINIO_BUCKET_NAME}/user1/sync.txt"
+    storage_service.client.put_object.assert_called_once()
