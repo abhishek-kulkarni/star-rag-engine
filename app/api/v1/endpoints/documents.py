@@ -1,3 +1,4 @@
+import logging
 from typing import Annotated
 
 import kombu.exceptions
@@ -11,6 +12,7 @@ from app.services.storage_service import storage_service
 from app.workers.tasks import start_ingestion_pipeline
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.post("/upload", status_code=status.HTTP_201_CREATED)
@@ -129,9 +131,13 @@ async def delete_document(
     # 2. Delete raw file from MinIO
     try:
         await storage_service.delete_file(doc.minio_raw_uri)
-    except Exception:
-        # Log error but proceed with DB deletion to ensure consistency
-        pass
+    except Exception as e:
+        # CRITICAL: Failed to purge physical file. Log for manual intervention
+        # but proceed with DB deletion to stop RAG engine from serving data.
+        logger.critical(
+            f"Orphaned file in storage: {doc.minio_raw_uri}. "
+            f"Manual intervention required for compliance. Error: {str(e)}"
+        )
 
     # 3. Synchronous DB Delete (CASCADE handles IngestionJob and DocumentChunks)
     db.delete(doc)
