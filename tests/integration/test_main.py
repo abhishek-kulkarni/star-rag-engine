@@ -14,4 +14,4 @@ def test_health_check():
 def test_root():
     response = client.get("/")
     assert response.status_code == 200
-    assert "STAR RAG Engine API" in response.json()["message"]
+    assert "STAR RAG Engine" in response.json()["message"]

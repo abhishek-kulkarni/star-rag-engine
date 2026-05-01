@@ -69,3 +69,6 @@ class LLMService:
         # The SDK automatically parses the JSON into the response_schema
         # (Pydantic model)
         return response.parsed
+
+
+llm_service = LLMService()
