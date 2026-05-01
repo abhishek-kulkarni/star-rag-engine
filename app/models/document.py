@@ -110,7 +110,7 @@ class DocumentChunk(Base):
     text_content: Mapped[str] = mapped_column(Text, nullable=False)
 
     # Gemini text-embedding-004 uses 768 dimensions
-    embedding: Mapped[list[float]] = mapped_column(Vector(768))
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(768), nullable=True)
 
     document: Mapped[Document] = relationship("Document", back_populates="chunks")
 
