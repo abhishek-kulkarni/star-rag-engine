@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import text
 
 from app.core.database import SessionLocal, engine
+from app.core.logging import telemetry
 from app.models.document import IngestionJob, JobStatus
 from app.workers.celery_app import celery_app
 
@@ -72,5 +73,6 @@ def vector_index_maintenance():
             return True
 
     except Exception as e:
+        telemetry.storage_errors.labels(service="postgres").inc()
         logger.error(f"Vector Index Maintenance failed: {e}")
         return False

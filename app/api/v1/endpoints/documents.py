@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.logging import telemetry
 from app.core.security import get_current_user
 from app.models.document import Document, DocumentType, IngestionJob, JobStatus
 from app.services.storage_service import storage_service
@@ -43,6 +44,7 @@ async def upload_document(
             content_type=file.content_type or "application/pdf",
         )
     except Exception as e:
+        telemetry.storage_errors.labels(service="minio").inc()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Storage upload failed: {str(e)}",
@@ -134,6 +136,7 @@ async def delete_document(
     except Exception as e:
         # CRITICAL: Failed to purge physical file. Log for manual intervention
         # but proceed with DB deletion to stop RAG engine from serving data.
+        telemetry.storage_errors.labels(service="minio").inc()
         logger.critical(
             f"Orphaned file in storage: {doc.minio_raw_uri}. "
             f"Manual intervention required for compliance. Error: {str(e)}"

@@ -1,8 +1,17 @@
 from fastapi import FastAPI
+from prometheus_client import make_asgi_app
 
 from app.api.v1.endpoints import documents, query
+from app.core.logging import setup_logging
+
+# 1. Initialize Structured Logging
+setup_logging()
 
 app = FastAPI(title="STAR RAG Engine")
+
+# 2. Expose Prometheus Metrics endpoint
+metrics_app = make_asgi_app()
+app.mount("/metrics", metrics_app)
 
 
 @app.get("/health")
