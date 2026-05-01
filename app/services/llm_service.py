@@ -43,9 +43,13 @@ class LLMService:
         """
         Synchronous version of batch embedding for Celery workers.
         """
+        # Explicitly wrap strings in Content objects to ensure the API
+        # returns one embedding per item, rather than aggregating them.
+        contents = [types.Content(parts=[types.Part.from_text(text=t)]) for t in texts]
+
         response = self.client.models.embed_content(
             model=self.embedding_model,
-            contents=texts,
+            contents=contents,
             config=types.EmbedContentConfig(
                 task_type="RETRIEVAL_DOCUMENT", output_dimensionality=768
             ),
