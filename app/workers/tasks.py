@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 
 from celery import Task, chain  # type: ignore
 
-from app.core.database import SessionLocal
+from app.core.database import SessionLocal, ensure_user_partition
 from app.models.document import Document, DocumentChunk, IngestionJob, JobStatus
 from app.services.llm_service import LLMService
 from app.services.parser_service import parser_service
@@ -125,15 +125,22 @@ def chunk_task(data: dict):
         chunks = parser_service.split_text(text)
 
         with SessionLocal() as db:
+            # Ensure the user partition exists before inserting
+            user_id = data["user_id"]
+            ensure_user_partition(db, user_id)
+
             # Idempotency: Clear existing chunks for this document
+            # We include user_id to ensure partition pruning.
             db.query(DocumentChunk).filter(
-                DocumentChunk.document_id == document_id
+                DocumentChunk.document_id == document_id,
+                DocumentChunk.user_id == user_id,
             ).delete()
 
             # Bulk insert chunks with empty embeddings
             for i, chunk_text in enumerate(chunks):
                 db_chunk = DocumentChunk(
                     document_id=document_id,
+                    user_id=user_id,
                     chunk_index=i,
                     text_content=chunk_text,
                     embedding=None,  # To be filled by next task
@@ -142,7 +149,7 @@ def chunk_task(data: dict):
 
             db.commit()
 
-        return {"job_id": job_id, "document_id": document_id}
+        return {"job_id": job_id, "document_id": document_id, "user_id": user_id}
     except Exception:
         raise
 
@@ -157,17 +164,22 @@ def embed_task(data: dict):
     update_job_status(job_id, JobStatus.EMBEDDING)
 
     try:
+        # embed_task receives user_id from the chain (passed from parse_task ->
+        # chunk_task)
+        user_id = data.get("user_id")
         llm = get_llm_service()
         with SessionLocal() as db:
             # Query chunks that need embedding
-            chunks = (
-                db.query(DocumentChunk)
-                .filter(
-                    DocumentChunk.document_id == document_id,
-                    DocumentChunk.embedding.is_(None),
-                )
-                .all()
+            # We include user_id to ensure partition pruning.
+            query = db.query(DocumentChunk).filter(
+                DocumentChunk.document_id == document_id,
+                DocumentChunk.embedding.is_(None),
             )
+
+            if user_id:
+                query = query.filter(DocumentChunk.user_id == user_id)
+
+            chunks = query.all()
 
             for chunk in chunks:
                 # Get vector (sync wrapper for async LLM call)

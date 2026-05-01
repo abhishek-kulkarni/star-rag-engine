@@ -105,29 +105,41 @@ def test_parse_task_logic(mock_db_session):
 
 def test_chunk_task_logic(mock_db_session):
     """Verify chunk_task downloads text, splits it, and saves to DB."""
-    data = {"job_id": 1, "document_id": 10, "text_uri": "minio://text"}
+    data = {
+        "job_id": 1,
+        "document_id": 10,
+        "text_uri": "minio://text",
+        "user_id": "user_123",
+    }
     with (
         patch("app.workers.tasks.storage_service.download_file"),
         patch("app.workers.tasks.parser_service.split_text") as mock_split,
         patch("app.workers.tasks.asyncio.run") as mock_run,
+        patch("app.workers.tasks.ensure_user_partition") as mock_ensure,
     ):
         mock_run.return_value = b"text bytes"
         mock_split.return_value = ["chunk 1", "chunk 2"]
         result = chunk_task(data)
         assert result["document_id"] == 10
+        assert result["user_id"] == "user_123"
+        mock_ensure.assert_called_once()
         assert mock_db_session.add.call_count == 2
         mock_db_session.commit.assert_called()
 
 
 def test_embed_task_logic(mock_db_session):
     """Verify embed_task fetches null-embedding chunks and fills them."""
-    data = {"job_id": 1, "document_id": 10}
+    data = {"job_id": 1, "document_id": 10, "user_id": "user_123"}
     # Using spec=DocumentChunk for schema safety
     chunk1 = MagicMock(spec=DocumentChunk)
     chunk1.text_content = "text 1"
     chunk1.embedding = None
 
+    # The query now has two filter calls when user_id is present
     mock_db_session.query.return_value.filter.return_value.all.return_value = [chunk1]
+    (
+        mock_db_session.query.return_value.filter.return_value.filter.return_value.all.return_value
+    ) = [chunk1]
 
     mock_llm = MagicMock()
     mock_llm.get_embeddings.return_value = [0.1]
@@ -155,7 +167,12 @@ def test_parse_task_failure(mock_db_session):
 
 def test_chunk_task_failure(mock_db_session):
     """Verify chunk_task raises exception on storage failure."""
-    data = {"job_id": 1, "document_id": 10, "text_uri": "minio://text"}
+    data = {
+        "job_id": 1,
+        "document_id": 10,
+        "text_uri": "minio://text",
+        "user_id": "user_123",
+    }
     with patch("app.workers.tasks.update_job_status"):
         with patch(
             "app.workers.tasks.asyncio.run", side_effect=Exception("Storage error")
@@ -166,11 +183,14 @@ def test_chunk_task_failure(mock_db_session):
 
 def test_embed_task_failure(mock_db_session):
     """Verify embed_task raises exception on LLM failure."""
-    data = {"job_id": 1, "document_id": 10}
-    # Using spec=DocumentChunk even in failure path
+    data = {"job_id": 1, "document_id": 10, "user_id": "user_123"}
+    # The query now has two filter calls when user_id is present
     mock_db_session.query.return_value.filter.return_value.all.return_value = [
         MagicMock(spec=DocumentChunk)
     ]
+    (
+        mock_db_session.query.return_value.filter.return_value.filter.return_value.all.return_value
+    ) = [MagicMock(spec=DocumentChunk)]
     with patch("app.workers.tasks.update_job_status"):
         with patch("app.workers.tasks.asyncio.run", side_effect=Exception("LLM error")):
             with pytest.raises(Exception, match="LLM error"):

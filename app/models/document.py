@@ -91,12 +91,21 @@ class DocumentChunk(Base):
     """
     Granular text segments with associated high-dimensional embeddings.
     Designed for similarity search using pgvector and HNSW indexing.
+    Partitioned by user_id for strict multi-tenant isolation.
     """
 
     __tablename__ = "document_chunks"
 
+    # For partitioned tables, the partition key must be part of the
+    # composite primary key.
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    document_id: Mapped[int] = mapped_column(ForeignKey("documents.id"))
+    user_id: Mapped[str] = mapped_column(
+        String(128), primary_key=True, index=True
+    )  # Denormalized for vector filtering
+
+    document_id: Mapped[int] = mapped_column(
+        ForeignKey("documents.id", ondelete="CASCADE")
+    )
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
     text_content: Mapped[str] = mapped_column(Text, nullable=False)
 
@@ -114,4 +123,6 @@ class DocumentChunk(Base):
             postgresql_with={"m": 16, "ef_construction": 64},
             postgresql_ops={"embedding": "vector_cosine_ops"},
         ),
+        # Declarative Partitioning via SQLAlchemy
+        {"postgresql_partition_by": "LIST (user_id)"},
     )

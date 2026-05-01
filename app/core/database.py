@@ -1,9 +1,36 @@
+import re
 from collections.abc import Generator
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config.settings import settings
+
+
+def ensure_user_partition(db: Session, user_id: str) -> None:
+    """
+    Dynamically creates a PostgreSQL partition for a specific user if it doesn't exist.
+    Uses strict DDL sanitization to prevent SQL injection.
+    """
+    # Strict validation: only alphanumeric characters, underscores, and hyphens allowed.
+    if not re.match(r"^[a-zA-Z0-9_-]+$", user_id):
+        raise ValueError(f"Invalid user_id for partition creation: {user_id}")
+
+    # PostgreSQL partition names must be unique.
+    # We use a safe prefix to avoid collisions with system tables.
+    partition_name = f"document_chunks_{user_id.replace('-', '_')}"
+
+    # DDL table names cannot be parameterized, but the values can.
+    # We use f-string for the table name (sanitized) and :uid for the value.
+    db.execute(
+        text(
+            f"CREATE TABLE IF NOT EXISTS {partition_name} "
+            "PARTITION OF document_chunks FOR VALUES IN (:uid);"
+        ),
+        {"uid": user_id},
+    )
+    db.commit()
+
 
 # For unit testing without a real DB, we use a sqlite in-memory for basic session tests
 # or we can mock it. Since Phase 1 is infrastructure, we'll setup the real URL.
