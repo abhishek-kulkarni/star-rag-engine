@@ -200,6 +200,114 @@ def test_embed_task_failure(mock_db_session):
                 embed_task(data)
 
 
+def test_parse_task_download_failure(mock_db_session):
+    """Verify parse_task handles storage download error."""
+    data = {"job_id": 1, "document_id": 10}
+    mock_doc = MagicMock(spec=Document)
+    mock_doc.minio_raw_uri = "minio://pdf"
+    mock_db_session.query.return_value.filter.return_value.first.return_value = mock_doc
+
+    with patch("app.workers.tasks.update_job_status"):
+        with patch(
+            "app.workers.tasks.storage_service.download_file_sync",
+            side_effect=Exception("Download failed"),
+        ):
+            with pytest.raises(Exception, match="Download failed"):
+                parse_task(data)
+
+
+def test_parse_task_extract_failure(mock_db_session):
+    """Verify parse_task handles text extraction error."""
+    data = {"job_id": 1, "document_id": 10}
+    mock_doc = MagicMock(spec=Document)
+    mock_doc.minio_raw_uri = "minio://pdf"
+    mock_db_session.query.return_value.filter.return_value.first.return_value = mock_doc
+
+    with (
+        patch("app.workers.tasks.update_job_status"),
+        patch(
+            "app.workers.tasks.storage_service.download_file_sync",
+            return_value=b"pdf bytes",
+        ),
+        patch(
+            "app.workers.tasks.parser_service.parse_pdf",
+            side_effect=Exception("Parse failed"),
+        ),
+    ):
+        with pytest.raises(Exception, match="Parse failed"):
+            parse_task(data)
+
+
+def test_parse_task_upload_failure(mock_db_session):
+    """Verify parse_task handles storage upload error."""
+    data = {"job_id": 1, "document_id": 10}
+    mock_doc = MagicMock(spec=Document)
+    mock_doc.minio_raw_uri = "minio://pdf"
+    mock_doc.user_id = 99
+    mock_db_session.query.return_value.filter.return_value.first.return_value = mock_doc
+
+    with (
+        patch("app.workers.tasks.update_job_status"),
+        patch(
+            "app.workers.tasks.storage_service.download_file_sync",
+            return_value=b"pdf bytes",
+        ),
+        patch("app.workers.tasks.parser_service.parse_pdf", return_value="text"),
+        patch(
+            "app.workers.tasks.storage_service.upload_file_sync",
+            side_effect=Exception("Upload failed"),
+        ),
+    ):
+        with pytest.raises(Exception, match="Upload failed"):
+            parse_task(data)
+
+
+def test_chunk_task_split_failure(mock_db_session):
+    """Verify chunk_task handles semantic splitting error."""
+    data = {
+        "job_id": 1,
+        "document_id": 10,
+        "text_uri": "minio://text",
+        "user_id": "user_123",
+    }
+    with (
+        patch("app.workers.tasks.update_job_status"),
+        patch(
+            "app.workers.tasks.storage_service.download_file_sync",
+            return_value=b"text bytes",
+        ),
+        patch(
+            "app.workers.tasks.parser_service.split_text",
+            side_effect=Exception("Split failed"),
+        ),
+    ):
+        with pytest.raises(Exception, match="Split failed"):
+            chunk_task(data)
+
+
+def test_chunk_task_db_insert_failure(mock_db_session):
+    """Verify chunk_task handles database insertion error."""
+    data = {
+        "job_id": 1,
+        "document_id": 10,
+        "text_uri": "minio://text",
+        "user_id": "user_123",
+    }
+    mock_db_session.commit.side_effect = Exception("DB Insert failed")
+
+    with (
+        patch("app.workers.tasks.update_job_status"),
+        patch(
+            "app.workers.tasks.storage_service.download_file_sync",
+            return_value=b"text bytes",
+        ),
+        patch("app.workers.tasks.parser_service.split_text", return_value=["chunk"]),
+        patch("app.workers.tasks.ensure_user_partition"),
+    ):
+        with pytest.raises(Exception, match="DB Insert failed"):
+            chunk_task(data)
+
+
 def test_the_sweeper_logic(mock_db_session):
     """Verify The Sweeper identifies and fails stale jobs."""
     from app.workers.beat_tasks import the_sweeper

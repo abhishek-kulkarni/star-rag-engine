@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -55,3 +56,10 @@ class STARAnswerResponse(BaseModel):
     )
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class QueryResponse(BaseModel):
+    """Wrapped RAG response with generated answer and source context."""
+
+    answer: STARAnswerResponse
+    source_nodes: list[dict[str, Any]] = []

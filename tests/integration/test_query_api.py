@@ -63,7 +63,10 @@ def test_ask_question_success(mock_db):
         response = client.post("/api/v1/query/ask", json={"query": "test query"})
 
         assert response.status_code == 200
-        assert response.json()["situation"] == "S"
+        data = response.json()
+        assert data["answer"]["situation"] == "S"
+        assert len(data["source_nodes"]) == 1
+        assert data["source_nodes"][0]["text_content"] == "Retrieved context"
         mock_embed.assert_called_once_with("test query")
         mock_gen.assert_called_once()
 
@@ -124,3 +127,26 @@ def test_ask_question_generation_failure(mock_db):
         response = client.post("/api/v1/query/ask", json={"query": "test query"})
         assert response.status_code == 500
         assert "Generation service failed" in response.json()["detail"]
+
+
+def test_ask_question_database_failure(mock_db):
+    """Verify 500 error when database search fails."""
+    with patch(
+        "app.api.v1.endpoints.query.llm_service.get_embeddings",
+        new_callable=AsyncMock,
+    ) as mock_embed:
+        mock_embed.return_value = [0.1] * 768
+
+        # Mock database exception
+        mock_db.query.side_effect = Exception("Connection lost")
+
+        response = client.post("/api/v1/query/ask", json={"query": "test query"})
+        assert response.status_code == 500
+        assert "Database search failed" in response.json()["detail"]
+
+
+def test_metrics_endpoint():
+    """Verify Prometheus metrics are exposed."""
+    response = client.get("/metrics/")
+    assert response.status_code == 200
+    assert "rag_query_latency_seconds" in response.text

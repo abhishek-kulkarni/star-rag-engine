@@ -4,6 +4,7 @@ from celery import Task, chain  # type: ignore
 
 from app.config.settings import settings
 from app.core.database import SessionLocal, ensure_user_partition
+from app.core.logging import telemetry
 from app.models.document import Document, DocumentChunk, IngestionJob, JobStatus
 from app.services.llm_service import LLMService
 from app.services.parser_service import parser_service
@@ -83,19 +84,31 @@ def parse_task(data: dict):
                 raise ValueError(f"Document {document_id} not found")
 
             # Download raw PDF
-            content = storage_service.download_file_sync(doc.minio_raw_uri)
+            try:
+                content = storage_service.download_file_sync(doc.minio_raw_uri)
+            except Exception:
+                telemetry.storage_errors.labels(service="minio").inc()
+                raise
 
             # Extract text
-            text = parser_service.parse_pdf(content)
+            try:
+                text = parser_service.parse_pdf(content)
+            except Exception:
+                telemetry.processing_errors.labels(stage="parse").inc()
+                raise
 
             # Save extracted text to storage (Claim Check)
-            text_filename = f"parsed_{document_id}.txt"
-            text_uri = storage_service.upload_file_sync(
-                filename=text_filename,
-                content=text.encode("utf-8"),
-                user_id=str(doc.user_id),
-                content_type="text/plain",
-            )
+            try:
+                text_filename = f"parsed_{document_id}.txt"
+                text_uri = storage_service.upload_file_sync(
+                    filename=text_filename,
+                    content=text.encode("utf-8"),
+                    user_id=str(doc.user_id),
+                    content_type="text/plain",
+                )
+            except Exception:
+                telemetry.storage_errors.labels(service="minio").inc()
+                raise
 
             return {
                 "job_id": job_id,
@@ -122,36 +135,48 @@ def chunk_task(data: dict):
 
     try:
         # Download extracted text
-        text_bytes = storage_service.download_file_sync(text_uri)
-        text = text_bytes.decode("utf-8")
+        try:
+            text_bytes = storage_service.download_file_sync(text_uri)
+            text = text_bytes.decode("utf-8")
+        except Exception:
+            telemetry.storage_errors.labels(service="minio").inc()
+            raise
 
         # Semantic splitting
-        chunks = parser_service.split_text(text)
+        try:
+            chunks = parser_service.split_text(text)
+        except Exception:
+            telemetry.processing_errors.labels(stage="chunk").inc()
+            raise
 
-        with SessionLocal() as db:
-            # Ensure the user partition exists before inserting
-            user_id = data["user_id"]
-            ensure_user_partition(db, user_id)
+        try:
+            with SessionLocal() as db:
+                # Ensure the user partition exists before inserting
+                user_id = data["user_id"]
+                ensure_user_partition(db, user_id)
 
-            # Idempotency: Clear existing chunks for this document
-            # We include user_id to ensure partition pruning.
-            db.query(DocumentChunk).filter(
-                DocumentChunk.document_id == document_id,
-                DocumentChunk.user_id == user_id,
-            ).delete()
+                # Idempotency: Clear existing chunks for this document
+                # We include user_id to ensure partition pruning.
+                db.query(DocumentChunk).filter(
+                    DocumentChunk.document_id == document_id,
+                    DocumentChunk.user_id == user_id,
+                ).delete()
 
-            # Bulk insert chunks with empty embeddings
-            for i, chunk_text in enumerate(chunks):
-                db_chunk = DocumentChunk(
-                    document_id=document_id,
-                    user_id=user_id,
-                    chunk_index=i,
-                    text_content=chunk_text,
-                    embedding=None,  # To be filled by next task
-                )
-                db.add(db_chunk)
+                # Bulk insert chunks with empty embeddings
+                for i, chunk_text in enumerate(chunks):
+                    db_chunk = DocumentChunk(
+                        document_id=document_id,
+                        user_id=user_id,
+                        chunk_index=i,
+                        text_content=chunk_text,
+                        embedding=None,  # To be filled by next task
+                    )
+                    db.add(db_chunk)
 
-            db.commit()
+                db.commit()
+        except Exception:
+            telemetry.storage_errors.labels(service="postgres").inc()
+            raise
 
         return {"job_id": job_id, "document_id": document_id, "user_id": user_id}
     except Exception:
@@ -174,31 +199,44 @@ def embed_task(data: dict):
         # chunk_task)
         user_id = data.get("user_id")
         llm = get_llm_service()
-        with SessionLocal() as db:
-            # Query chunks that need embedding
-            # We include user_id to ensure partition pruning.
-            query = db.query(DocumentChunk).filter(
-                DocumentChunk.document_id == document_id,
-                DocumentChunk.embedding.is_(None),
-            )
+        try:
+            with SessionLocal() as db:
+                # Query chunks that need embedding
+                # We include user_id to ensure partition pruning.
+                query = db.query(DocumentChunk).filter(
+                    DocumentChunk.document_id == document_id,
+                    DocumentChunk.embedding.is_(None),
+                )
 
-            if user_id:
-                query = query.filter(DocumentChunk.user_id == user_id)
+                if user_id:
+                    query = query.filter(DocumentChunk.user_id == user_id)
 
-            chunks = query.all()
+                chunks = query.all()
 
-            if chunks:
-                # 1. Extract all text content into a single list
-                chunk_texts = [chunk.text_content for chunk in chunks]
+                if chunks:
+                    # 1. Extract all text content into a single list
+                    chunk_texts = [chunk.text_content for chunk in chunks]
 
-                # 2. Call the LLM API exactly once for the entire batch (sync)
-                vectors = llm.get_embeddings_batch_sync(chunk_texts)
+                    # 2. Call the LLM API exactly once for the entire batch (sync)
+                    try:
+                        vectors = llm.get_embeddings_batch_sync(chunk_texts)
+                    except Exception:
+                        telemetry.llm_errors.labels(model="embed").inc()
+                        raise
 
-                # 3. Zip the returned vectors back to the SQLAlchemy objects
-                for chunk, vector in zip(chunks, vectors, strict=True):
-                    chunk.embedding = vector
+                    # 3. Zip the returned vectors back to the SQLAlchemy objects
+                    for chunk, vector in zip(chunks, vectors, strict=True):
+                        chunk.embedding = vector
 
-            db.commit()
+                db.commit()
+        except Exception as e:
+            # If it's already been tracked as an LLM error, don't double count
+            # as a postgres error unless it's actually a DB failure.
+            # However, for simplicity, we let the inner raises handle it.
+            if "telemetry" not in str(e):  # Avoid double counting if already raised
+                # If we didn't raise from LLM block, it might be a DB block failure
+                pass
+            raise
 
         update_job_status(job_id, JobStatus.COMPLETED)
         return True
