@@ -115,13 +115,10 @@ def test_chunk_task_logic(mock_db_session):
     with (
         patch("app.workers.tasks.storage_service.download_file_sync") as mock_download,
         patch("app.workers.tasks.parser_service.split_text") as mock_split,
-        patch("app.workers.tasks.asyncio.run"),
         patch("app.workers.tasks.ensure_user_partition") as mock_ensure,
     ):
         mock_download.return_value = b"text bytes"
         mock_split.return_value = ["chunk 1", "chunk 2"]
-        # asyncio.run is still used for update_job_status
-        # or other things if they are async but here we mainly mock the download
         result = chunk_task(data)
         assert result["document_id"] == 10
         assert result["user_id"] == "user_123"
@@ -145,16 +142,16 @@ def test_embed_task_logic(mock_db_session):
     ) = [chunk1]
 
     mock_llm = MagicMock()
-    mock_llm.get_embeddings.return_value = [0.1]
+    mock_llm.get_embeddings_batch_sync.return_value = [[0.1]]
 
     with (
         patch("app.workers.tasks.get_llm_service", return_value=mock_llm),
-        patch("app.workers.tasks.asyncio.run", side_effect=lambda x: [0.1]),
     ):
         result = embed_task(data)
         assert result is True
         assert chunk1.embedding == [0.1]
         mock_db_session.commit.assert_called()
+        mock_llm.get_embeddings_batch_sync.assert_called_once()
 
 
 def test_parse_task_failure(mock_db_session):
@@ -196,7 +193,9 @@ def test_embed_task_failure(mock_db_session):
         mock_db_session.query.return_value.filter.return_value.filter.return_value.all.return_value
     ) = [MagicMock(spec=DocumentChunk)]
     with patch("app.workers.tasks.update_job_status"):
-        with patch("app.workers.tasks.asyncio.run", side_effect=Exception("LLM error")):
+        mock_llm = MagicMock()
+        mock_llm.get_embeddings_batch_sync.side_effect = Exception("LLM error")
+        with patch("app.workers.tasks.get_llm_service", return_value=mock_llm):
             with pytest.raises(Exception, match="LLM error"):
                 embed_task(data)
 

@@ -30,6 +30,17 @@ class LLMService:
         )
         return response.embeddings[0].values
 
+    def get_embeddings_batch_sync(self, texts: list[str]) -> list[list[float]]:
+        """
+        Synchronous version of batch embedding for Celery workers.
+        """
+        response = self.client.models.embed_content(
+            model=self.embedding_model,
+            contents=texts,
+            config=types.EmbedContentConfig(task_type="RETRIEVAL_DOCUMENT"),
+        )
+        return [emb.values for emb in response.embeddings]
+
     async def generate_star_answer(
         self,
         query: str,

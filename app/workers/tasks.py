@@ -1,4 +1,3 @@
-import asyncio
 from datetime import UTC, datetime
 
 from celery import Task, chain  # type: ignore
@@ -188,10 +187,16 @@ def embed_task(data: dict):
 
             chunks = query.all()
 
-            for chunk in chunks:
-                # Get vector (sync wrapper for async LLM call)
-                vector = asyncio.run(llm.get_embeddings(chunk.text_content))
-                chunk.embedding = vector
+            if chunks:
+                # 1. Extract all text content into a single list
+                chunk_texts = [chunk.text_content for chunk in chunks]
+
+                # 2. Call the LLM API exactly once for the entire batch (sync)
+                vectors = llm.get_embeddings_batch_sync(chunk_texts)
+
+                # 3. Zip the returned vectors back to the SQLAlchemy objects
+                for chunk, vector in zip(chunks, vectors, strict=True):
+                    chunk.embedding = vector
 
             db.commit()
 
