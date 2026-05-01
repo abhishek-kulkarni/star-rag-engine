@@ -76,6 +76,51 @@ services:
       minio:
         condition: service_healthy
 
+  celery-ingestion:
+    build: .
+    container_name: starrag-ingestion
+    command: celery -A app.workers.celery_app worker --loglevel=info
+    environment:
+      <<: *app-env
+    volumes:
+      - .:/app
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+  celery-beat:
+    build: .
+    container_name: starrag-beat
+    command: celery -A app.workers.celery_app beat --loglevel=info
+    environment:
+      <<: *app-env
+    volumes:
+      - .:/app
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: starrag-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - promdata:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    depends_on:
+      - api
+
 volumes:
   pgdata:
   miniodata:
+  promdata:
