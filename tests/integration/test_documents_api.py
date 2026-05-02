@@ -171,3 +171,28 @@ def test_delete_document_storage_resilience(mock_db):
         assert response.status_code == 204
         # Verify DB delete was still called
         mock_db.delete.assert_called_once_with(mock_doc)
+
+
+def test_get_jobs_list_success(mock_db):
+    """Verify retrieving list of jobs for the current user."""
+    mock_job = MagicMock(spec=IngestionJob)
+    mock_job.id = 1
+    mock_job.status = JobStatus.COMPLETED
+    mock_job.document = MagicMock(spec=Document)
+    mock_job.document.filename = "test.pdf"
+    mock_job.created_at = None
+    mock_job.completed_at = None
+    mock_job.error_message = None
+
+    query_mock = mock_db.query.return_value
+    (
+        query_mock.join.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value
+    ) = [mock_job]
+
+    response = client.get("/api/v1/documents/jobs")
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 1
+    assert data[0]["job_id"] == 1
+    assert data[0]["filename"] == "test.pdf"
+    assert data[0]["status"] == "COMPLETED"

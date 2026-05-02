@@ -43,7 +43,9 @@ async def upload_document(
             user_id=current_user,
             content_type=file.content_type or "application/pdf",
         )
+        logger.info(f"File {file.filename} uploaded to MinIO by {current_user}")
     except Exception as e:
+        logger.error(f"MinIO upload failed for {file.filename}: {str(e)}")
         telemetry.storage_errors.labels(service="minio").inc()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -63,10 +65,14 @@ async def upload_document(
     job = IngestionJob(document_id=doc.id, status=JobStatus.PENDING)
     db.add(job)
     db.commit()
+    logger.info(
+        f"DB record initialized for {file.filename} (DocID: {doc.id}, JobID: {job.id})"
+    )
 
     # 3. Trigger Celery Pipeline with Dual-Write Mitigation
     try:
         start_ingestion_pipeline(job.id, doc.id)
+        logger.info(f"Ingestion pipeline triggered for JobID: {job.id}")
     except kombu.exceptions.OperationalError as e:
         # Broker (Redis) is down. Roll back job state to prevent "stuck" jobs.
         job.status = JobStatus.FAILED
@@ -110,6 +116,36 @@ async def get_job_status(
     }
 
 
+@router.get("/jobs")
+async def list_jobs(
+    current_user: Annotated[str, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
+):
+    """Lists the last 5 ingestion jobs for the current user."""
+    logger.info(f"User {current_user} requested ingestion job list")
+    jobs = (
+        db.query(IngestionJob)
+        .join(Document)
+        .filter(Document.user_id == current_user)
+        .order_by(IngestionJob.created_at.desc())
+        .limit(5)
+        .all()
+    )
+
+    return [
+        {
+            "job_id": job.id,
+            "document_id": job.document_id,
+            "filename": job.document.filename,
+            "status": job.status,
+            "error": job.error_message,
+            "created_at": job.created_at,
+            "completed_at": job.completed_at,
+        }
+        for job in jobs
+    ]
+
+
 @router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_document(
     document_id: int,
@@ -145,5 +181,9 @@ async def delete_document(
     # 3. Synchronous DB Delete (CASCADE handles IngestionJob and DocumentChunks)
     db.delete(doc)
     db.commit()
+
+    logger.info(
+        f"Successfully purged document {document_id} and data for {current_user}"
+    )
 
     return None

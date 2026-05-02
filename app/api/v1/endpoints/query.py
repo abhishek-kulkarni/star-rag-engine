@@ -1,3 +1,4 @@
+import logging
 import time
 from typing import Annotated
 
@@ -12,6 +13,7 @@ from app.models.schemas import QueryResponse, RAGQueryRequest
 from app.services.llm_service import llm_service
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.post("/ask", response_model=QueryResponse)
@@ -26,12 +28,14 @@ async def ask_question(
     2. Performs similarity search with strict partition pruning (user_id).
     3. Generates a structured STAR answer grounded in the retrieved chunks.
     """
+    logger.info(f"Received query from user {current_user}: {request.query[:50]}...")
     start_time = time.perf_counter()
 
     # 1. Generate query embedding (768-dim)
     try:
         query_vector = await llm_service.get_embeddings(request.query)
     except Exception as e:
+        logger.error(f"Embedding failed for user {current_user}: {str(e)}")
         telemetry.llm_errors.labels(model="embed").inc()
         raise HTTPException(
             status_code=500, detail=f"LLM Embedding service failed: {str(e)}"
@@ -47,13 +51,16 @@ async def ask_question(
             .limit(5)  # Retrieve top-5 most relevant context segments
             .all()
         )
+        logger.info(f"Retrieved {len(chunks)} context chunks for user {current_user}")
     except Exception as e:
+        logger.error(f"Similarity search failed for user {current_user}: {str(e)}")
         telemetry.storage_errors.labels(service="postgres").inc()
         raise HTTPException(
             status_code=500, detail=f"Database search failed: {str(e)}"
         ) from e
 
     if not chunks:
+        logger.warning(f"No context found for user {current_user} query")
         raise HTTPException(
             status_code=404,
             detail="No relevant context found. Please upload documents first.",
@@ -73,10 +80,12 @@ async def ask_question(
 
         # 5. Track Telemetry (Latency)
         duration = time.perf_counter() - start_time
+        logger.info(f"STAR Answer generated for {current_user} in {duration:.2f}s")
         telemetry.track_query(duration)
 
         return QueryResponse(answer=answer, source_nodes=retrieved_chunks)
     except Exception as e:
+        logger.error(f"Generation failed for user {current_user}: {str(e)}")
         telemetry.llm_errors.labels(model="generate").inc()
         raise HTTPException(
             status_code=500, detail=f"LLM Generation service failed: {str(e)}"
