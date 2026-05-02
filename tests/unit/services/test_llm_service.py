@@ -93,3 +93,48 @@ async def test_generate_star_answer_failure_telemetry():
         assert "Permanent Error" in str(exc.value)
         # Verify telemetry error counter was incremented
         mock_telemetry.llm_errors.labels.return_value.inc.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_get_embeddings_retry_on_429():
+    """Verify that get_embeddings retries on 429 errors."""
+    service = LLMService()
+
+    mock_response = AsyncMock()
+    mock_response.embeddings = [MagicMock(values=[0.1, 0.2])]
+
+    # Fail twice, succeed on 3rd
+    side_effect = [
+        Exception("429 Resource Exhausted"),
+        Exception("RESOURCE_EXHAUSTED"),
+        mock_response,
+    ]
+
+    with patch.object(
+        service.client.aio.models, "embed_content", side_effect=side_effect
+    ) as mock_embed:
+        with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            res = await service.get_embeddings("hello")
+            assert res == [0.1, 0.2]
+            assert mock_embed.call_count == 3
+            assert mock_sleep.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_get_embeddings_failure_telemetry():
+    """Verify embedding failure telemetry."""
+    service = LLMService()
+
+    with (
+        patch.object(
+            service.client.aio.models,
+            "embed_content",
+            side_effect=Exception("Embed Fail"),
+        ),
+        patch("app.services.llm_service.telemetry") as mock_telemetry,
+    ):
+        with pytest.raises(Exception, match="Embed Fail"):
+            await service.get_embeddings("hello")
+
+        mock_telemetry.llm_errors.labels.assert_called_with(model="embed")
+        mock_telemetry.llm_errors.labels.return_value.inc.assert_called_once()

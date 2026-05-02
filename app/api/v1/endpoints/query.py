@@ -88,5 +88,6 @@ async def ask_question(
         logger.error(f"Generation failed for user {current_user}: {str(e)}")
         telemetry.llm_errors.labels(model="generate").inc()
         raise HTTPException(
-            status_code=500, detail=f"LLM Generation service failed: {str(e)}"
+            status_code=500,
+            detail="LLM Generation service failed. Please try again later.",
         ) from e

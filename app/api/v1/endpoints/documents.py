@@ -49,7 +49,7 @@ async def upload_document(
         telemetry.storage_errors.labels(service="minio").inc()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Storage upload failed: {str(e)}",
+            detail="Storage upload failed. Please try again later.",
         ) from e
 
     # 2. Database state initialization

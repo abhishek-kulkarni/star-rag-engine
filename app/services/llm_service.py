@@ -1,3 +1,4 @@
+import asyncio
 import logging
 
 from google import genai
@@ -19,27 +20,47 @@ class LLMService:
         # The new SDK uses a unified Client object
         self.client = genai.Client(api_key=settings.GEMINI_API_KEY)
         self.embedding_model = "gemini-embedding-2"
-        self.generation_model = "gemini-2.0-flash"
+        self.generation_model = "gemini-2.5-flash"
 
     async def get_embeddings(self, text: str) -> list[float]:
         """
         Generates 768-dimensional embeddings for a given text.
+        Includes resilient retry logic for 429 Rate Limits.
         """
-        # Using .aio namespace for true non-blocking execution
-        response = await self.client.aio.models.embed_content(
-            model=self.embedding_model,
-            contents=text,
-            config=types.EmbedContentConfig(
-                task_type="RETRIEVAL_DOCUMENT", output_dimensionality=768
-            ),
-        )
+        max_retries = 5
+        for attempt in range(max_retries):
+            try:
+                # Using .aio namespace for true non-blocking execution
+                response = await self.client.aio.models.embed_content(
+                    model=self.embedding_model,
+                    contents=text,
+                    config=types.EmbedContentConfig(
+                        task_type="RETRIEVAL_DOCUMENT", output_dimensionality=768
+                    ),
+                )
+                # Track Telemetry (Estimation)
+                # Gemini embeddings don't return usage_metadata, so we estimate
+                estimated_tokens = max(1, len(text) // 4)
+                telemetry.track_tokens(prompt=estimated_tokens, completion=0)
 
-        # Track Telemetry (Estimation)
-        # Gemini embeddings don't return usage_metadata, so we estimate
-        estimated_tokens = max(1, len(text) // 4)
-        telemetry.track_tokens(prompt=estimated_tokens, completion=0)
+                return response.embeddings[0].values
+            except Exception as e:
+                logging.warning(
+                    f"[LLMService] Embedding attempt {attempt} failed: {str(e)}"
+                )
+                if (
+                    "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e)
+                ) and attempt < max_retries - 1:
+                    import random
 
-        return response.embeddings[0].values
+                    # Exponential Backoff + Jitter
+                    wait_time = (2**attempt) * 2 + random.uniform(0, 0.5)
+                    await asyncio.sleep(wait_time)
+                    continue
+                telemetry.llm_errors.labels(model="embed").inc()
+                raise
+
+        raise RuntimeError("get_embeddings failed")  # pragma: no cover
 
     def get_embeddings_batch_sync(self, texts: list[str]) -> list[list[float]]:
         logging.info(f"[LLMService] Embedding batch of {len(texts)} chunks")
@@ -82,8 +103,9 @@ class LLMService:
         system_instruction = get_system_instructions(plan_artifacts_text)
         user_prompt = get_user_prompt(query, retrieved_chunks)
 
-        # Basic retry logic for synchronous API calls
-        max_retries = 3
+        # 4. Generate Answer with Resilient Retry Logic (Exponential Backoff + Jitter)
+        max_retries = 5
+        response = None
         for attempt in range(max_retries):
             try:
                 # Using .aio.models.generate_content for asynchronous generation
@@ -99,23 +121,33 @@ class LLMService:
                 )
                 break  # Success!
             except Exception as e:
-                if "429" in str(e) and attempt < max_retries - 1:
-                    # Wait 5 seconds before retrying sync path
-                    import asyncio
+                logging.warning(
+                    f"[LLMService] Retry attempt {attempt} failed: {str(e)}"
+                )
+                if (
+                    "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e)
+                ) and attempt < max_retries - 1:
+                    import random
 
-                    await asyncio.sleep(5)
+                    # Exponential Backoff: 2, 4, 8, 16...
+                    # Jitter: +/- up to 500ms
+                    wait_time = (2**attempt) * 2 + random.uniform(0, 0.5)
+                    await asyncio.sleep(wait_time)
                     continue
                 telemetry.llm_errors.labels(model="generate").inc()
                 raise
 
         # 5. Track Telemetry (Tokens)
-        if response.usage_metadata:
+        if response and response.usage_metadata:
             telemetry.track_tokens(
                 prompt=response.usage_metadata.prompt_token_count,
                 completion=response.usage_metadata.candidates_token_count,
             )
 
-        return response.parsed
+        if response:
+            return response.parsed
+
+        raise RuntimeError("generate_star_answer failed")  # pragma: no cover
 
 
 llm_service = LLMService()
