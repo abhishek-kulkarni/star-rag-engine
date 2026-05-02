@@ -6,71 +6,90 @@ from app.models.schemas import STARAnswerResponse
 from app.services.llm_service import LLMService
 
 
-@pytest.fixture
-def llm_service():
-    with patch("google.genai.Client"):
-        service = LLMService()
-        return service
-
-
 @pytest.mark.asyncio
-async def test_get_embeddings(llm_service):
-    # Mock the new SDK response structure in the .aio namespace
-    mock_response = MagicMock()
-    mock_response.embeddings = [MagicMock(values=[0.1, 0.2, 0.3])]
-    # Mock usage metadata for telemetry
-    mock_response.usage_metadata.prompt_token_count = 10
-    llm_service.client.aio.models.embed_content = AsyncMock(return_value=mock_response)
+async def test_generate_star_answer_retry_on_429():
+    """Verify that generate_star_answer retries on 429 errors."""
+    service = LLMService()
 
-    embedding = await llm_service.get_embeddings("test text")
-
-    assert embedding == [0.1, 0.2, 0.3]
-    llm_service.client.aio.models.embed_content.assert_called_once()
-
-
-def test_get_embeddings_batch_sync(llm_service):
-    """Verify synchronous LLM service handles batch requests."""
-    mock_response = MagicMock()
-    mock_response.embeddings = [
-        MagicMock(values=[0.1]),
-        MagicMock(values=[0.2]),
-    ]
-    # Mock usage metadata for telemetry
-    mock_response.usage_metadata.prompt_token_count = 20
-    llm_service.client.models.embed_content.return_value = mock_response
-
-    embeddings = llm_service.get_embeddings_batch_sync(["text1", "text2"])
-
-    assert embeddings == [[0.1], [0.2]]
-    llm_service.client.models.embed_content.assert_called_once()
-
-
-@pytest.mark.asyncio
-async def test_generate_star_answer(llm_service):
-    # Mock the new SDK response structure in the .aio namespace
-    mock_response = MagicMock()
-    mock_parsed = STARAnswerResponse(
-        situation="Situation",
-        task="Task",
-        action="Action",
-        result="Result",
-        citations=[1],
+    # Mock response object
+    mock_response = AsyncMock()
+    mock_response.parsed = STARAnswerResponse(
+        situation="s", task="t", action="a", result="r", citations=[]
     )
-    mock_response.parsed = mock_parsed
-
-    # Mock usage metadata for telemetry
     mock_response.usage_metadata = MagicMock()
-    mock_response.usage_metadata.prompt_token_count = 100
-    mock_response.usage_metadata.candidates_token_count = 50
+    mock_response.usage_metadata.prompt_token_count = 10
+    mock_response.usage_metadata.candidates_token_count = 5
 
-    llm_service.client.aio.models.generate_content = AsyncMock(
-        return_value=mock_response
-    )
+    # We want it to fail with 429 twice, then succeed on the 3rd attempt
+    side_effect = [
+        Exception("429 Resource Exhausted"),
+        Exception("429 Resource Exhausted"),
+        mock_response,
+    ]
 
-    chunks = [{"id": 1, "text_content": "Context content"}]
-    answer = await llm_service.generate_star_answer("test query", chunks)
+    with patch.object(
+        service.client.aio.models, "generate_content", side_effect=side_effect
+    ) as mock_gen:
+        # Patch asyncio.sleep to speed up tests
+        with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            with patch("app.services.llm_service.telemetry") as mock_telemetry:
+                result = await service.generate_star_answer("query", [])
 
-    assert isinstance(answer, STARAnswerResponse)
-    assert answer.situation == "Situation"
-    assert answer.citations == [1]
-    llm_service.client.aio.models.generate_content.assert_called_once()
+                assert result.situation == "s"
+                assert mock_gen.call_count == 3
+                assert mock_sleep.call_count == 2
+                # Verify token tracking
+                mock_telemetry.track_tokens.assert_called_once_with(
+                    prompt=10, completion=5
+                )
+
+
+@pytest.mark.asyncio
+async def test_get_embeddings():
+    """Verify single embedding retrieval."""
+    service = LLMService()
+    mock_response = AsyncMock()
+    mock_response.embeddings = [MagicMock(values=[0.1, 0.2])]
+    mock_response.usage_metadata.prompt_token_count = 5
+
+    with patch.object(
+        service.client.aio.models, "embed_content", return_value=mock_response
+    ):
+        res = await service.get_embeddings("hello")
+        assert res == [0.1, 0.2]
+
+
+def test_get_embeddings_batch_sync():
+    """Verify batch embedding retrieval."""
+    service = LLMService()
+    mock_response = MagicMock()
+    mock_response.embeddings = [MagicMock(values=[0.1]), MagicMock(values=[0.2])]
+    mock_response.usage_metadata.prompt_token_count = 10
+
+    with patch.object(
+        service.client.models, "embed_content", return_value=mock_response
+    ):
+        res = service.get_embeddings_batch_sync(["a", "b"])
+        assert res == [[0.1], [0.2]]
+
+
+@pytest.mark.asyncio
+async def test_generate_star_answer_failure_telemetry():
+    """Verify that telemetry is tracked on final failure."""
+    service = LLMService()
+
+    # Always fail
+    side_effect = Exception("Permanent Error")
+
+    with (
+        patch.object(
+            service.client.aio.models, "generate_content", side_effect=side_effect
+        ),
+        patch("app.services.llm_service.telemetry") as mock_telemetry,
+    ):
+        with pytest.raises(Exception) as exc:
+            await service.generate_star_answer("query", [])
+
+        assert "Permanent Error" in str(exc.value)
+        # Verify telemetry error counter was incremented
+        mock_telemetry.llm_errors.labels.return_value.inc.assert_called_once()

@@ -1,3 +1,5 @@
+import logging
+
 from google import genai
 from google.genai import types
 
@@ -32,14 +34,15 @@ class LLMService:
             ),
         )
 
-        # Track Telemetry (Tokens)
-        usage = getattr(response, "usage_metadata", None)
-        if usage:
-            telemetry.track_tokens(prompt=usage.prompt_token_count, completion=0)
+        # Track Telemetry (Estimation)
+        # Gemini embeddings don't return usage_metadata, so we estimate
+        estimated_tokens = max(1, len(text) // 4)
+        telemetry.track_tokens(prompt=estimated_tokens, completion=0)
 
         return response.embeddings[0].values
 
     def get_embeddings_batch_sync(self, texts: list[str]) -> list[list[float]]:
+        logging.info(f"[LLMService] Embedding batch of {len(texts)} chunks")
         """
         Synchronous version of batch embedding for Celery workers.
         """
@@ -55,10 +58,13 @@ class LLMService:
             ),
         )
 
-        # Track Telemetry (Tokens)
-        usage = getattr(response, "usage_metadata", None)
-        if usage:
-            telemetry.track_tokens(prompt=usage.prompt_token_count, completion=0)
+        # Track Telemetry (Estimation)
+        # Gemini embeddings don't return usage_metadata, so we estimate
+        # based on character counts (Avg ~4 chars per token).
+        total_chars = sum(len(t) for t in texts)
+        estimated_tokens = max(1, total_chars // 4)
+
+        telemetry.track_tokens(prompt=estimated_tokens, completion=0)
 
         return [emb.values for emb in response.embeddings]
 
@@ -71,21 +77,36 @@ class LLMService:
         """
         Generates a structured STAR answer grounded in the provided contexts.
         Uses a dynamic system instruction to inject rubrics and anti-bias guardrails.
+        Includes basic retry logic for 429 Rate Limits.
         """
         system_instruction = get_system_instructions(plan_artifacts_text)
         user_prompt = get_user_prompt(query, retrieved_chunks)
 
-        # Using .aio.models.generate_content for asynchronous generation
-        response = await self.client.aio.models.generate_content(
-            model=self.generation_model,
-            contents=user_prompt,
-            config=types.GenerateContentConfig(
-                system_instruction=system_instruction,
-                response_mime_type="application/json",
-                response_schema=STARAnswerResponse,
-                temperature=0.0,  # Ensure maximum determinism for Principal-level RAG
-            ),
-        )
+        # Basic retry logic for synchronous API calls
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                # Using .aio.models.generate_content for asynchronous generation
+                response = await self.client.aio.models.generate_content(
+                    model=self.generation_model,
+                    contents=user_prompt,
+                    config=types.GenerateContentConfig(
+                        system_instruction=system_instruction,
+                        response_mime_type="application/json",
+                        response_schema=STARAnswerResponse,
+                        temperature=0.0,
+                    ),
+                )
+                break  # Success!
+            except Exception as e:
+                if "429" in str(e) and attempt < max_retries - 1:
+                    # Wait 5 seconds before retrying sync path
+                    import asyncio
+
+                    await asyncio.sleep(5)
+                    continue
+                telemetry.llm_errors.labels(model="generate").inc()
+                raise
 
         # 5. Track Telemetry (Tokens)
         if response.usage_metadata:
