@@ -1,0 +1,273 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+
+:root {
+    --primary: #6366f1;
+    --primary-glow: rgba(99, 102, 241, 0.5);
+    --secondary: #8b5cf6;
+    --bg: #0f172a;
+    --card-bg: rgba(30, 41, 59, 0.6);
+    --border: rgba(255, 255, 255, 0.1);
+    --text: #f8fafc;
+    --text-muted: #94a3b8;
+    --success: #10b981;
+    --error: #ef4444;
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: 'Inter', sans-serif;
+    background-color: var(--bg);
+    color: var(--text);
+    background: radial-gradient(circle at top right, #1e1b4b, #0f172a);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 2rem;
+}
+
+header {
+    width: 100%;
+    max-width: 800px;
+    margin-bottom: 3rem;
+    text-align: center;
+}
+
+h1 {
+    font-size: 2.5rem;
+    font-weight: 800;
+    background: linear-gradient(to right, #818cf8, #c084fc);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    letter-spacing: -0.025em;
+    margin-bottom: 0.5rem;
+}
+
+.subtitle {
+    color: var(--text-muted);
+    font-size: 1rem;
+}
+
+.dashboard-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 2rem;
+    width: 100%;
+    max-width: 1200px;
+}
+
+.section-title {
+    font-size: 1.25rem;
+    font-weight: 700;
+    margin-bottom: 1.5rem;
+    color: var(--primary);
+}
+
+/* Query Styling */
+.query-box textarea {
+    width: 100%;
+    height: 120px;
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid var(--border);
+    border-radius: 0.75rem;
+    padding: 1rem;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 0.95rem;
+    resize: none;
+    margin-bottom: 1rem;
+}
+
+.primary-btn {
+    width: 100%;
+    background: linear-gradient(135deg, var(--primary), var(--secondary));
+    border: none;
+    border-radius: 0.75rem;
+    padding: 1rem;
+    color: white;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.primary-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px var(--primary-glow);
+}
+
+/* STAR Result styling */
+.star-section {
+    margin-top: 1.5rem;
+    display: flex;
+    gap: 1rem;
+    line-height: 1.6;
+    font-size: 0.95rem;
+    animation: fadeIn 0.8s ease-out;
+}
+
+.star-label {
+    background: linear-gradient(135deg, var(--primary), var(--secondary));
+    width: 2.25rem;
+    height: 2.25rem;
+    border-radius: 0.75rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 900;
+    font-size: 1.1rem;
+    flex-shrink: 0;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+}
+
+.hidden { display: none !important; }
+
+/* Spinner */
+.spinner {
+    width: 40px;
+    height: 40px;
+    border: 3px solid rgba(255, 255, 255, 0.1);
+    border-top: 3px solid var(--primary);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin: 2rem auto 1rem;
+}
+
+@keyframes spin { 100% { transform: rotate(360deg); } }
+
+/* Glassmorphism Card */
+.glass-card {
+    background: var(--card-bg);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid var(--border);
+    border-radius: 1.5rem;
+    padding: 2rem;
+    margin-bottom: 2rem;
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.3);
+}
+
+/* Upload Zone */
+.upload-zone {
+    border: 2px dashed var(--border);
+    border-radius: 1rem;
+    padding: 3rem;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.upload-zone:hover {
+    border-color: var(--primary);
+    background: rgba(99, 102, 241, 0.05);
+    box-shadow: 0 0 20px var(--primary-glow);
+}
+
+.upload-zone svg {
+    width: 48px;
+    height: 48px;
+    color: var(--primary);
+    margin-bottom: 1rem;
+}
+
+#file-input {
+    display: none;
+}
+
+/* Job List */
+.job-item {
+    margin-top: 1.5rem;
+    padding: 1.25rem;
+    border-radius: 1rem;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border);
+    animation: fadeIn 0.5s ease-out;
+}
+
+.job-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 0.75rem;
+}
+
+.job-info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.delete-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    padding: 0.4rem;
+    cursor: pointer;
+    border-radius: 0.5rem;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-top: -0.2rem;
+}
+
+.delete-btn:hover {
+    background: rgba(239, 68, 68, 0.15);
+    color: var(--error);
+    transform: scale(1.1);
+}
+
+.delete-btn svg {
+    width: 1.25rem;
+    height: 1.25rem;
+}
+
+.filename {
+    font-weight: 600;
+    font-size: 0.95rem;
+    word-break: break-all;
+}
+
+.status-badge {
+    font-size: 0.75rem;
+    font-weight: 700;
+    padding: 0.25rem 0.75rem;
+    border-radius: 9999px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.status-completed { background: rgba(16, 185, 129, 0.2); color: var(--success); }
+.status-failed { background: rgba(239, 68, 68, 0.2); color: var(--error); }
+.status-processing { background: rgba(99, 102, 241, 0.2); color: var(--primary); }
+
+/* Progress Bar */
+.progress-container {
+    height: 6px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.progress-fill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, var(--primary), var(--secondary));
+    box-shadow: 0 0 10px var(--primary-glow);
+    transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.error-msg {
+    color: var(--error);
+    font-size: 0.85rem;
+    margin-top: 0.5rem;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}

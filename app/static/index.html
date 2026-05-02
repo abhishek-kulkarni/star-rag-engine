@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>STAR RAG Engine | Ingestion Dashboard</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header>
+        <h1>STAR RAG Engine</h1>
+        <p class="subtitle">Production-Grade Technical Document Ingestion</p>
+    </header>
+
+    <main class="dashboard-grid">
+        <!-- Left: Ingestion Column -->
+        <section class="ingestion-column">
+            <div class="glass-card">
+                <h2 class="section-title">Document Ingestion</h2>
+                <div class="upload-zone" id="drop-zone">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                    </svg>
+                    <p>Click to upload or drag & drop</p>
+                    <p class="subtitle">Supported: PDF, DOCX, TXT</p>
+                    <input type="file" id="file-input" accept=".pdf,.docx,.txt">
+                </div>
+            </div>
+
+            <div id="job-list-container">
+                <!-- Jobs will be dynamically injected here -->
+            </div>
+        </section>
+
+        <!-- Right: Query Column -->
+        <section class="query-column">
+            <div class="glass-card">
+                <h2 class="section-title">Semantic Retrieval</h2>
+                <div class="query-box">
+                    <textarea id="query-input" placeholder="Ask a question about your documents..."></textarea>
+                    <button id="ask-btn" class="primary-btn">Generate STAR Answer</button>
+                </div>
+                
+                <!-- Loading State -->
+                <div id="query-loading" class="hidden">
+                    <div class="spinner"></div>
+                    <p class="subtitle">Retrieving context and generating answer...</p>
+                </div>
+
+                <!-- STAR Result Area -->
+                <div id="query-result" class="hidden">
+                    <div class="star-section">
+                        <span class="star-label">S</span>
+                        <p id="res-situation"></p>
+                    </div>
+                    <div class="star-section">
+                        <span class="star-label">T</span>
+                        <p id="res-task"></p>
+                    </div>
+                    <div class="star-section">
+                        <span class="star-label">A</span>
+                        <p id="res-action"></p>
+                    </div>
+                    <div class="star-section">
+                        <span class="star-label">R</span>
+                        <p id="res-result"></p>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <script src="app.js"></script>
+</body>
+</html>
