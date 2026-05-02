@@ -1,7 +1,7 @@
 import logging
 import logging.config
 
-from prometheus_client import REGISTRY, Counter, Histogram
+from prometheus_client import REGISTRY, Counter, Histogram, start_http_server
 
 from app.config.settings import settings
 
@@ -52,8 +52,14 @@ class Telemetry:
         self.query_latency.observe(duration)
 
     def track_tokens(self, prompt: int, completion: int):
+        logging.info(f"[Telemetry] Tokens: p={prompt}, c={completion}")
         self.token_usage.labels(type="prompt").inc(prompt)
         self.token_usage.labels(type="completion").inc(completion)
+
+    def start_telemetry_server(self, port: int = 8001):
+        """Starts a standalone HTTP server for Prometheus scraping (used in workers)."""
+        start_http_server(port)
+        logging.info(f"Telemetry server started on port {port}")
 
 
 # Singleton instance

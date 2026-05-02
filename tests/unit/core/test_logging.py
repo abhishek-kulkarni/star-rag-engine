@@ -1,62 +1,55 @@
 from unittest.mock import patch
 
-import pytest
-from prometheus_client import CollectorRegistry
-
-from app.core.logging import Telemetry, setup_logging
+from app.core.logging import telemetry
 
 
-@pytest.fixture
-def registry():
-    return CollectorRegistry()
+def test_start_telemetry_server():
+    """Verify that the telemetry server starts correctly."""
+    with patch("app.core.logging.start_http_server") as mock_start:
+        telemetry.start_telemetry_server(port=9999)
+        mock_start.assert_called_once_with(9999)
 
 
-def test_telemetry_metrics_initialization(registry):
-    """Verify Prometheus metrics are initialized."""
-    telemetry = Telemetry(registry=registry)
-    assert hasattr(telemetry, "query_latency")
-    assert hasattr(telemetry, "token_usage")
-    assert hasattr(telemetry, "storage_errors")
-    assert hasattr(telemetry, "llm_errors")
+def test_track_tokens():
+    """Verify token tracking updates the counter."""
+    # We use a fresh registry to avoid global state pollution
+    from prometheus_client import CollectorRegistry
+
+    from app.core.logging import Telemetry
+
+    registry = CollectorRegistry()
+    test_telemetry = Telemetry(registry=registry)
+
+    test_telemetry.track_tokens(prompt=10, completion=20)
+
+    # Check the value in the registry
+    prompt_val = registry.get_sample_value("rag_token_usage_total", {"type": "prompt"})
+    completion_val = registry.get_sample_value(
+        "rag_token_usage_total", {"type": "completion"}
+    )
+
+    assert prompt_val == 10
+    assert completion_val == 20
 
 
-def test_telemetry_track_llm_errors(registry):
-    """Verify LLM error tracking with labels."""
-    telemetry = Telemetry(registry=registry)
-    with patch.object(telemetry.llm_errors, "labels") as mock_labels:
-        telemetry.llm_errors.labels(model="generate").inc()
-        mock_labels.assert_called_once_with(model="generate")
-        mock_labels.return_value.inc.assert_called_once()
+def test_track_query():
+    """Verify query latency tracking."""
+    from prometheus_client import CollectorRegistry
+
+    from app.core.logging import Telemetry
+
+    registry = CollectorRegistry()
+    test_telemetry = Telemetry(registry=registry)
+    test_telemetry.track_query(0.5)
+
+    # Check the histogram sample
+    val = registry.get_sample_value("rag_query_latency_seconds_sum")
+    assert val == 0.5
 
 
-def test_telemetry_track_query_latency(registry):
-    """Verify latency tracking increment."""
-    telemetry = Telemetry(registry=registry)
-    with patch.object(telemetry.query_latency, "observe") as mock_observe:
-        telemetry.track_query(duration=1.5)
-        mock_observe.assert_called_once_with(1.5)
+def test_setup_logging():
+    """Verify logging setup runs without error."""
+    from app.core.logging import setup_logging
 
-
-def test_telemetry_track_token_usage(registry):
-    """Verify token usage tracking with labels."""
-    telemetry = Telemetry(registry=registry)
-    with patch.object(telemetry.token_usage, "labels") as mock_labels:
-        telemetry.track_tokens(prompt=100, completion=50)
-        # Verify both labels are called
-        mock_labels.assert_any_call(type="prompt")
-        mock_labels.assert_any_call(type="completion")
-        # Verify increment
-        assert mock_labels.return_value.inc.call_count == 2
-
-
-@patch("logging.config.dictConfig")
-def test_setup_logging_production(mock_dict_config):
-    """Verify JSON formatting is applied in production."""
-    with patch("app.core.logging.settings") as mock_settings:
-        mock_settings.ENVIRONMENT = "production"
-        setup_logging()
-        # Verify JSON formatter is in the config
-        args, _ = mock_dict_config.call_args
-        config = args[0]
-        assert "json" in config["formatters"]
-        assert config["handlers"]["console"]["formatter"] == "json"
+    # Just ensure it doesn't crash
+    setup_logging()

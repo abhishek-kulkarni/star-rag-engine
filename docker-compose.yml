@@ -80,7 +80,9 @@ services:
   celery-ingestion:
     build: .
     container_name: starrag-ingestion
-    command: celery -A app.workers.celery_app worker --loglevel=info
+    command: celery -A app.workers.celery_app worker --loglevel=info --pool=threads --concurrency=10
+    ports:
+      - "8001:8001"
     environment:
       <<: *app-env
     volumes:
