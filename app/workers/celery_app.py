@@ -1,6 +1,18 @@
 from celery import Celery  # type: ignore
+from celery.signals import worker_ready
 
 from app.config.settings import settings
+from app.core.logging import setup_logging, telemetry
+
+# Initialize structured logging for the worker
+setup_logging()
+
+
+@worker_ready.connect
+def setup_direct_metrics(sender, **kwargs):
+    """Start Prometheus metrics server when worker is ready."""
+    telemetry.start_telemetry_server(port=8001)
+
 
 # Initialize Celery with Redis broker and backend
 celery_app = Celery(

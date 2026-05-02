@@ -1,3 +1,4 @@
+import logging
 from datetime import UTC, datetime
 
 from celery import Task, chain  # type: ignore
@@ -10,6 +11,8 @@ from app.services.llm_service import LLMService
 from app.services.parser_service import parser_service
 from app.services.storage_service import storage_service
 from app.workers.celery_app import celery_app
+
+logger = logging.getLogger(__name__)
 
 # Lazy-loaded services to avoid module-level side effects during testing
 _llm_service = None
@@ -75,6 +78,9 @@ def parse_task(data: dict):
     """Downloads PDF, extracts text, and saves text back to storage."""
     job_id = data["job_id"]
     document_id = data["document_id"]
+    logger.info(
+        f"[Ingestion] parse_task started (JobID: {job_id}, DocID: {document_id})"
+    )
     update_job_status(job_id, JobStatus.PARSING)
 
     try:
@@ -86,6 +92,7 @@ def parse_task(data: dict):
             # Download raw PDF
             try:
                 content = storage_service.download_file_sync(doc.minio_raw_uri)
+                logger.info(f"[Ingestion] PDF downloaded from {doc.minio_raw_uri}")
             except Exception:
                 telemetry.storage_errors.labels(service="minio").inc()
                 raise
@@ -93,6 +100,7 @@ def parse_task(data: dict):
             # Extract text
             try:
                 text = parser_service.parse_pdf(content)
+                logger.info(f"[Ingestion] PDF text extracted ({len(text)} chars)")
             except Exception:
                 telemetry.processing_errors.labels(stage="parse").inc()
                 raise
@@ -106,6 +114,7 @@ def parse_task(data: dict):
                     user_id=str(doc.user_id),
                     content_type="text/plain",
                 )
+                logger.info(f"[Ingestion] Extracted text saved to {text_uri}")
             except Exception:
                 telemetry.storage_errors.labels(service="minio").inc()
                 raise
@@ -116,8 +125,8 @@ def parse_task(data: dict):
                 "text_uri": text_uri,
                 "user_id": doc.user_id,
             }
-    except Exception:
-        # on_failure handles status update and re-raising
+    except Exception as e:
+        logger.error(f"[Ingestion] parse_task FAILED for JobID: {job_id}: {str(e)}")
         raise
 
 
@@ -131,6 +140,7 @@ def chunk_task(data: dict):
     job_id = data["job_id"]
     document_id = data["document_id"]
     text_uri = data["text_uri"]
+    logger.info(f"[Ingestion] Starting chunk_task for JobID: {job_id}")
     update_job_status(job_id, JobStatus.CHUNKING)
 
     try:
@@ -145,6 +155,7 @@ def chunk_task(data: dict):
         # Semantic splitting
         try:
             chunks = parser_service.split_text(text)
+            logger.info(f"[Ingestion] Split into {len(chunks)} semantic chunks")
         except Exception:
             telemetry.processing_errors.labels(stage="chunk").inc()
             raise
@@ -174,12 +185,16 @@ def chunk_task(data: dict):
                     db.add(db_chunk)
 
                 db.commit()
+                logger.info(
+                    f"[Ingestion] {len(chunks)} chunks persisted (DocID: {document_id})"
+                )
         except Exception:
             telemetry.storage_errors.labels(service="postgres").inc()
             raise
 
         return {"job_id": job_id, "document_id": document_id, "user_id": user_id}
-    except Exception:
+    except Exception as e:
+        logger.error(f"[Ingestion] chunk_task FAILED for JobID: {job_id}: {str(e)}")
         raise
 
 
@@ -194,6 +209,7 @@ def embed_task(self, data: dict):
     """Fetches chunks from DB, generates vectors, and updates DB."""
     job_id = data["job_id"]
     document_id = data["document_id"]
+    logger.info(f"[Ingestion] Starting embed_task for JobID: {job_id}")
     update_job_status(job_id, JobStatus.EMBEDDING)
 
     try:
@@ -216,6 +232,7 @@ def embed_task(self, data: dict):
                 chunks = query.all()
 
                 if chunks:
+                    logger.info(f"[Ingestion] Embedding {len(chunks)} chunks...")
                     # Batch processing to avoid payload size limits.
                     batch_size = 10
 
@@ -234,6 +251,10 @@ def embed_task(self, data: dict):
                                 )
 
                         except Exception as e:
+                            logger.warning(
+                                f"[Ingestion] Batch failed "
+                                f"(Retry {self.request.retries}): {str(e)}"
+                            )
                             telemetry.llm_errors.labels(model="embed").inc()
                             # Yield the worker back to the pool with exponential backoff
                             # Formula: 2^retries * 5s (e.g. 5s, 10s, 20s...)
@@ -247,17 +268,20 @@ def embed_task(self, data: dict):
                         # Commit incrementally! If we hit a 429 on the next batch,
                         # the successful chunks are saved and won't be re-processed.
                         db.commit()
+                        logger.info(
+                            f"[Ingestion] Batch {i // batch_size + 1} completed"
+                        )
 
         except Exception as e:
-            # If it's already been tracked as an LLM error, don't double count
-            # as a postgres error unless it's actually a DB failure.
-            # However, for simplicity, we let the inner raises handle it.
+            # Avoid double-counting errors already tracked by telemetry
             if "telemetry" not in str(e) and not isinstance(e, self.retry.__class__):
-                # If we didn't raise from LLM block, it might be a DB block failure
-                pass
+                logger.error(
+                    f"[Ingestion] embed_task CRITICAL failure for JobID: {job_id}: {e}"
+                )
             raise
 
         update_job_status(job_id, JobStatus.COMPLETED)
+        logger.info(f"[Ingestion] PIPELINE COMPLETED for JobID: {job_id}")
         return True
     except Exception:
         raise
