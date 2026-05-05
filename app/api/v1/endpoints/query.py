@@ -38,7 +38,8 @@ async def ask_question(
         logger.error(f"Embedding failed for user {current_user}: {str(e)}")
         telemetry.llm_errors.labels(model="embed").inc()
         raise HTTPException(
-            status_code=500, detail=f"LLM Embedding service failed: {str(e)}"
+            status_code=500,
+            detail="LLM Embedding service failed. Please try again later.",
         ) from e
 
     # 2. Similarity search using cosine distance on pgvector
@@ -56,7 +57,7 @@ async def ask_question(
         logger.error(f"Similarity search failed for user {current_user}: {str(e)}")
         telemetry.storage_errors.labels(service="postgres").inc()
         raise HTTPException(
-            status_code=500, detail=f"Database search failed: {str(e)}"
+            status_code=500, detail="Database search failed. Please try again later."
         ) from e
 
     if not chunks:

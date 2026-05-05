@@ -182,5 +182,10 @@ async def run_benchmark():
 
 
 if __name__ == "__main__":
+    import sys
+
+    print("CRITICAL: Evaluation script is disabled to protect API quotas.")
+    sys.exit(1)
+
     logging.basicConfig(level=logging.INFO)
     asyncio.run(run_benchmark())
