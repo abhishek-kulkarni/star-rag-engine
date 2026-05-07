@@ -46,7 +46,8 @@ async def ask_question(
     # MUST filter by user_id to ensure partition pruning and multi-tenant isolation
     try:
         chunks = (
-            db.query(DocumentChunk)
+            db
+            .query(DocumentChunk)
             .filter(DocumentChunk.user_id == current_user)
             .order_by(DocumentChunk.embedding.cosine_distance(query_vector))
             .limit(5)  # Retrieve top-5 most relevant context segments

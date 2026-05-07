@@ -31,20 +31,56 @@ We strictly follow **Clean Architecture** boundaries:
 ## 🚦 Getting Started
 
 ### Prerequisites
-- Docker & Docker Compose
-- Google Gemini API Key
+- **Python 3.14+** (Managed via `uv`)
+- **Docker & Docker Compose**
+- **Google Gemini API Key**
 
-### Setup
-1. Clone the repository.
-2. Create a `.env` file with your credentials (see `app/config/settings.py`).
-3. Launch the infrastructure:
+### 📄 Documentation
+- **System Design**: [STAR RAG Engine - System Design.pdf](design/STAR%20RAG%20Engine%20-%20System%20Design.pdf)
+- **Architecture Diagrams**: [Ingestion](design/STAR%20RAG%20Engine%20-%20Ingestion%20Sequence%20Diagram.png), [Query/RAG](design/STAR%20RAG%20Engine%20-%20Query:RAG%20Sequence%20Diagram.png)
+
+### Setup & Run
+1. **Infrastructure**: Launch the core services (Postgres, Redis, MinIO):
    ```bash
-   docker-compose up --build
+   docker-compose up -d
+   ```
+2. **Environment**: Use `uv` to manage dependencies and virtual environment:
+   ```bash
+   # Install dependencies
+   uv sync
+   
+   # Setup environment variables
+   cp .env.example .env  # Update with your GEMINI_API_KEY
+   ```
+3. **Run API**:
+   ```bash
+   uv run fastapi dev app/main.py
+   ```
+4. **Run Workers**: In a separate terminal:
+   ```bash
+   uv run celery -A app.workers.celery_app worker --loglevel=info -Q ingestion,celery
    ```
 
+## 🎨 UI Interaction
+The engine includes a premium, glassmorphic dashboard for real-time interaction.
+1. **Access**: Navigate to `http://localhost:8000` after starting the API.
+2. **Ingestion**: Drag & drop files (**PDF, DOCX, TXT**) into the upload zone. Monitor real-time status (Pending → Parsing → Chunking → Embedding → Completed).
+3. **Semantic Query**: Use the "Semantic Retrieval" box to ask technical questions. The engine will return grounded answers in the **STAR (Situation, Task, Action, Result)** format.
+
 ## 🧪 Verification
+- **Unit & Integration Tests**:
+  ```bash
+  uv run pytest tests/unit
+  ```
+- **RAG Evaluation**: 
+  > [!WARNING]
+  > The `scripts/evaluate_rag.py` script has been **disabled** with a safety gate to prevent accidental execution and quota drainage. To enable it for a specific run, comment out the `sys.exit(1)` block at the top of the file.
+  
+  ```bash
+  uv run python scripts/evaluate_rag.py
+  ```
 - **Automated**: Unit, Integration, and E2E tests using `pytest`.
-- **AI Evaluation**: "LLM-as-a-Judge" script measuring Context Precision, Faithfulness, and Answer Relevance.
+- **AI Evaluation**: "LLM-as-a-Judge" architecture measuring Context Precision, Faithfulness, and Answer Relevance.
 
 ## 📝 License
 Proprietary. © 2026 Abhishek Kulkarni.

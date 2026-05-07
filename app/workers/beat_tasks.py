@@ -21,16 +21,15 @@ def the_sweeper():
 
     with SessionLocal() as db:
         stale_jobs = (
-            db.query(IngestionJob)
+            db
+            .query(IngestionJob)
             .filter(
-                IngestionJob.status.in_(
-                    [
-                        JobStatus.PENDING,
-                        JobStatus.PARSING,
-                        JobStatus.CHUNKING,
-                        JobStatus.EMBEDDING,
-                    ]
-                ),
+                IngestionJob.status.in_([
+                    JobStatus.PENDING,
+                    JobStatus.PARSING,
+                    JobStatus.CHUNKING,
+                    JobStatus.EMBEDDING,
+                ]),
                 IngestionJob.created_at < timeout_threshold,
             )
             .all()

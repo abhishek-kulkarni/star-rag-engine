@@ -34,12 +34,10 @@ def get_user_prompt(query: str, retrieved_chunks: list[dict]) -> str:
     Formats the dynamic RAG context. Chunk IDs are explicitly provided
     so the LLM can map them to the 'citations' array in the Pydantic response.
     """
-    context_string = "\n\n".join(
-        [
-            f"--- CHUNK ID: {chunk['id']} ---\n{chunk['text_content']}"
-            for chunk in retrieved_chunks
-        ]
-    )
+    context_string = "\n\n".join([
+        f"--- CHUNK ID: {chunk['id']} ---\n{chunk['text_content']}"
+        for chunk in retrieved_chunks
+    ])
 
     return f"""
 Please answer the following query using ONLY the context provided below. 

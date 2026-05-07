@@ -98,7 +98,8 @@ async def get_job_status(
 ):
     """Retrieves the status of an ingestion job, scoped to the current user."""
     job = (
-        db.query(IngestionJob)
+        db
+        .query(IngestionJob)
         .join(Document)
         .filter(IngestionJob.id == job_id, Document.user_id == current_user)
         .first()
@@ -124,7 +125,8 @@ async def list_jobs(
     """Lists the last 5 ingestion jobs for the current user."""
     logger.info(f"User {current_user} requested ingestion job list")
     jobs = (
-        db.query(IngestionJob)
+        db
+        .query(IngestionJob)
         .join(Document)
         .filter(Document.user_id == current_user)
         .order_by(IngestionJob.created_at.desc())
@@ -158,7 +160,8 @@ async def delete_document(
     """
     # 1. Verify ownership
     doc = (
-        db.query(Document)
+        db
+        .query(Document)
         .filter(Document.id == document_id, Document.user_id == current_user)
         .first()
     )
