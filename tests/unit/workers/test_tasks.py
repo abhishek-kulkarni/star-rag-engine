@@ -37,9 +37,13 @@ def test_base_task_on_failure_direct_id(mock_db_session):
     exc = Exception("Direct fail")
     args = [5]  # Direct int ID
 
-    with patch("app.workers.tasks.update_job_status") as mock_update:
+    with (
+        patch("app.workers.tasks.update_job_status") as mock_update,
+        patch.object(BaseIngestionTask, "apply_async") as mock_apply,
+    ):
         task.on_failure(exc, "task-id", args, {}, None)
         mock_update.assert_called_once_with(5, JobStatus.FAILED, "Direct fail")
+        mock_apply.assert_called_once()
 
 
 def test_get_llm_service_lazy_init(monkeypatch):
@@ -93,7 +97,7 @@ def test_parse_task_logic(mock_db_session):
 
     with (
         patch("app.workers.tasks.storage_service.download_file_sync") as mock_download,
-        patch("app.workers.tasks.parser_service.parse_pdf") as mock_parse,
+        patch("app.workers.tasks.parser_service.parse") as mock_parse,
         patch("app.workers.tasks.storage_service.upload_file_sync") as mock_upload,
     ):
         mock_download.return_value = b"pdf bytes"
@@ -230,7 +234,7 @@ def test_parse_task_extract_failure(mock_db_session):
             return_value=b"pdf bytes",
         ),
         patch(
-            "app.workers.tasks.parser_service.parse_pdf",
+            "app.workers.tasks.parser_service.parse",
             side_effect=Exception("Parse failed"),
         ),
     ):
@@ -252,7 +256,7 @@ def test_parse_task_upload_failure(mock_db_session):
             "app.workers.tasks.storage_service.download_file_sync",
             return_value=b"pdf bytes",
         ),
-        patch("app.workers.tasks.parser_service.parse_pdf", return_value="text"),
+        patch("app.workers.tasks.parser_service.parse", return_value="text"),
         patch(
             "app.workers.tasks.storage_service.upload_file_sync",
             side_effect=Exception("Upload failed"),

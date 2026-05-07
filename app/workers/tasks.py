@@ -75,7 +75,7 @@ class BaseIngestionTask(Task):
     queue=settings.CELERY_INGESTION_QUEUE,
 )
 def parse_task(data: dict):
-    """Downloads PDF, extracts text, and saves text back to storage."""
+    """Downloads document, extracts text, and saves text back to storage."""
     job_id = data["job_id"]
     document_id = data["document_id"]
     logger.info(
@@ -89,18 +89,20 @@ def parse_task(data: dict):
             if not doc:
                 raise ValueError(f"Document {document_id} not found")
 
-            # Download raw PDF
+            # Download raw document
             try:
                 content = storage_service.download_file_sync(doc.minio_raw_uri)
-                logger.info(f"[Ingestion] PDF downloaded from {doc.minio_raw_uri}")
+                logger.info(f"[Ingestion] Document downloaded from {doc.minio_raw_uri}")
             except Exception:
                 telemetry.storage_errors.labels(service="minio").inc()
                 raise
 
             # Extract text
             try:
-                text = parser_service.parse_pdf(content)
-                logger.info(f"[Ingestion] PDF text extracted ({len(text)} chars)")
+                text = parser_service.parse(content, doc.filename)
+                logger.info(
+                    f"[Ingestion] {doc.filename} text extracted ({len(text)} chars)"
+                )
             except Exception:
                 telemetry.processing_errors.labels(stage="parse").inc()
                 raise

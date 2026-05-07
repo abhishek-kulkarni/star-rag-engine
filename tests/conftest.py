@@ -1,11 +1,25 @@
-from unittest.mock import patch
+import sys
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-# --- GLOBAL SAFETY NET: Initialization Only ---
-# We surgically mock the bucket check during StorageService initialization
-# to prevent collection errors while Docker is down.
-patch("app.services.storage_service.StorageService._ensure_bucket_exists").start()
+# We mock 'minio' globally to prevent any network calls during module imports.
+# This allows tests to run without Docker while protecting quotas.
+sys.modules["minio"] = MagicMock()
+
+
+@pytest.fixture(autouse=True)
+def protect_storage(request):
+    """
+    Global safety net to prevent StorageService from making network calls
+    during initialization (bucket check).
+    Skips the mock for storage unit tests to allow verification of logic.
+    """
+    if "test_storage_service" in request.node.nodeid:
+        yield
+    else:
+        with patch("app.services.storage_service.StorageService._ensure_bucket_exists"):
+            yield
 
 
 @pytest.fixture(autouse=True)

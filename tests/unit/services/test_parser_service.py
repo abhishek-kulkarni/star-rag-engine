@@ -1,3 +1,5 @@
+import pytest
+
 from app.services.parser_service import parser_service
 
 
@@ -66,3 +68,65 @@ def test_parse_pdf_integration(monkeypatch):
     # Test with sanitization
     text_sanitized = parser_service.parse_pdf(b"dummy_bytes", sanitize=True)
     assert "Extracted PDF text." in text_sanitized
+
+
+def test_parse_txt():
+    """Verify TXT extraction logic."""
+    content = b"Hello from text file."
+    text = parser_service.parse_txt(content, sanitize=False)
+    assert text == "Hello from text file."
+
+    # Test with sanitization
+    text_sanitized = parser_service.parse_txt(content, sanitize=True)
+    assert "Hello" in text_sanitized
+
+
+def test_parse_docx(monkeypatch):
+    """
+    Verify DOCX extraction logic.
+    Mocks docx.Document to avoid needing a physical file.
+    """
+    from unittest.mock import MagicMock
+
+    mock_paragraph = MagicMock()
+    mock_paragraph.text = "Hello from DOCX."
+
+    mock_doc = MagicMock()
+    mock_doc.paragraphs = [mock_paragraph]
+
+    monkeypatch.setattr("docx.Document", lambda x: mock_doc)
+
+    text = parser_service.parse_docx(b"dummy_docx_bytes", sanitize=False)
+    assert text == "Hello from DOCX."
+
+    # Test with sanitization
+    text_sanitized = parser_service.parse_docx(b"dummy_docx_bytes", sanitize=True)
+    assert "Hello" in text_sanitized
+
+
+def test_parse_routing(monkeypatch):
+    """Verify the generic parse method routes correctly."""
+    from unittest.mock import MagicMock
+
+    # Mock all specific parsers
+    monkeypatch.setattr(parser_service, "parse_pdf", MagicMock(return_value="pdf"))
+    monkeypatch.setattr(parser_service, "parse_docx", MagicMock(return_value="docx"))
+    monkeypatch.setattr(parser_service, "parse_txt", MagicMock(return_value="txt"))
+
+    assert parser_service.parse(b"b", "file.pdf") == "pdf"
+    assert parser_service.parse(b"b", "file.docx") == "docx"
+    assert parser_service.parse(b"b", "file.txt") == "txt"
+    assert parser_service.parse(b"b", "unknown.bin") == "txt"  # Fallback
+
+
+def test_parse_error(monkeypatch):
+    """Verify parse raises ValueError on unsupported and undecodable format."""
+    from unittest.mock import MagicMock
+
+    # Mock parse_txt to fail (e.g. decoding error)
+    monkeypatch.setattr(
+        parser_service, "parse_txt", MagicMock(side_effect=Exception("Decode error"))
+    )
+
+    with pytest.raises(ValueError, match="Unsupported file format: bin"):
+        parser_service.parse(b"b", "file.bin")

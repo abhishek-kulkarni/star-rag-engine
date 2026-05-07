@@ -1,5 +1,8 @@
 # Built-in generics are preferred in Python 3.9+ (PEP 585)
 
+import io
+
+import docx  # python-docx
 import fitz  # PyMuPDF
 from presidio_analyzer import AnalyzerEngine
 from presidio_anonymizer import AnonymizerEngine
@@ -19,12 +22,46 @@ class ParserService:
         )
         self.anonymizer = AnonymizerEngine()
 
+    def parse(self, content: bytes, filename: str, sanitize: bool = True) -> str:
+        """Routes content to the appropriate parser based on file extension."""
+        ext = filename.split(".")[-1].lower() if "." in filename else ""
+
+        if ext == "pdf":
+            return self.parse_pdf(content, sanitize)
+        elif ext == "docx":
+            return self.parse_docx(content, sanitize)
+        elif ext == "txt":
+            return self.parse_txt(content, sanitize)
+        else:
+            # Fallback: try to decode as UTF-8 text if unknown
+            try:
+                return self.parse_txt(content, sanitize)
+            except Exception as e:
+                raise ValueError(f"Unsupported file format: {ext}") from e
+
     def parse_pdf(self, content: bytes, sanitize: bool = True) -> str:
         """Extracts raw text from PDF bytes and optionally sanitizes PII."""
         text = ""
         with fitz.open(stream=content, filetype="pdf") as doc:
             for page in doc:
                 text += page.get_text()
+
+        if sanitize:
+            return self.sanitize_text(text)
+        return text
+
+    def parse_docx(self, content: bytes, sanitize: bool = True) -> str:
+        """Extracts raw text from DOCX bytes and optionally sanitizes PII."""
+        doc = docx.Document(io.BytesIO(content))
+        text = "\n".join([paragraph.text for paragraph in doc.paragraphs])
+
+        if sanitize:
+            return self.sanitize_text(text)
+        return text
+
+    def parse_txt(self, content: bytes, sanitize: bool = True) -> str:
+        """Extracts raw text from TXT bytes and optionally sanitizes PII."""
+        text = content.decode("utf-8")
 
         if sanitize:
             return self.sanitize_text(text)
