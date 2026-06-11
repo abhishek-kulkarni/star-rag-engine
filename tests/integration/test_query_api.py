@@ -150,3 +150,122 @@ def test_metrics_endpoint():
     response = client.get("/metrics/")
     assert response.status_code == 200
     assert "rag_query_latency_seconds" in response.text
+
+
+def test_ask_question_with_plan_artifact_success(mock_db):
+    """
+    Verify that plan artifact content is downloaded and passed to the LLM.
+    Covers lines 99-102 (the try block inside the artifact download loop).
+    """
+    from app.models.document import Document
+
+    with (
+        patch(
+            "app.api.v1.endpoints.query.llm_service.get_embeddings",
+            new_callable=AsyncMock,
+        ) as mock_embed,
+        patch(
+            "app.api.v1.endpoints.query.llm_service.generate_star_answer",
+            new_callable=AsyncMock,
+        ) as mock_gen,
+        patch(
+            "app.api.v1.endpoints.query.storage_service.download_file",
+            new_callable=AsyncMock,
+        ) as mock_download,
+    ):
+        mock_embed.return_value = [0.1] * 768
+
+        # First query() call → DocumentChunk similarity search
+        mock_chunk = MagicMock(spec=DocumentChunk)
+        mock_chunk.id = 1
+        mock_chunk.text_content = "Retrieved context"
+
+        # Second query() call → Document plan artifact lookup
+        mock_artifact = MagicMock(spec=Document)
+        mock_artifact.minio_raw_uri = "s3://bucket/user/rubric.txt"
+        mock_artifact.filename = "rubric.txt"
+
+        # Wire up the two separate db.query() chains
+        chunk_chain = MagicMock()
+        chunk_result = chunk_chain.filter.return_value.order_by.return_value
+        chunk_result.limit.return_value.all.return_value = [mock_chunk]
+
+        artifact_chain = MagicMock()
+        artifact_chain.filter.return_value.filter.return_value.all.return_value = [
+            mock_artifact
+        ]
+        artifact_chain.filter.return_value.all.return_value = [mock_artifact]
+
+        mock_db.query.side_effect = lambda model: (
+            chunk_chain if model is DocumentChunk else artifact_chain
+        )
+
+        mock_download.return_value = b"Always own the outcome."
+        mock_gen.return_value = STARAnswerResponse(
+            situation="S", task="T", action="A", result="R", citations=[1]
+        )
+
+        response = client.post("/api/v1/query/ask", json={"query": "test query"})
+
+        assert response.status_code == 200
+        # Confirm the artifact text was passed through to the LLM
+        call_kwargs = mock_gen.call_args.kwargs
+        assert call_kwargs["plan_artifacts_text"] == "Always own the outcome."
+
+
+def test_ask_question_plan_artifact_download_failure(mock_db):
+    """
+    Verify that a failing artifact download is gracefully swallowed (logged as
+    warning) and the query still completes successfully without the artifact text.
+    Covers lines 103-106 (the except block inside the artifact download loop).
+    """
+    from app.models.document import Document
+
+    with (
+        patch(
+            "app.api.v1.endpoints.query.llm_service.get_embeddings",
+            new_callable=AsyncMock,
+        ) as mock_embed,
+        patch(
+            "app.api.v1.endpoints.query.llm_service.generate_star_answer",
+            new_callable=AsyncMock,
+        ) as mock_gen,
+        patch(
+            "app.api.v1.endpoints.query.storage_service.download_file",
+            new_callable=AsyncMock,
+            side_effect=Exception("MinIO unreachable"),
+        ),
+    ):
+        mock_embed.return_value = [0.1] * 768
+
+        mock_chunk = MagicMock(spec=DocumentChunk)
+        mock_chunk.id = 1
+        mock_chunk.text_content = "Retrieved context"
+
+        mock_artifact = MagicMock(spec=Document)
+        mock_artifact.minio_raw_uri = "s3://bucket/user/rubric.txt"
+        mock_artifact.filename = "rubric.txt"
+
+        chunk_chain = MagicMock()
+        chunk_result = chunk_chain.filter.return_value.order_by.return_value
+        chunk_result.limit.return_value.all.return_value = [mock_chunk]
+
+        artifact_chain = MagicMock()
+        artifact_chain.filter.return_value.all.return_value = [mock_artifact]
+
+        mock_db.query.side_effect = lambda model: (
+            chunk_chain if model is DocumentChunk else artifact_chain
+        )
+
+        mock_gen.return_value = STARAnswerResponse(
+            situation="S", task="T", action="A", result="R", citations=[1]
+        )
+
+        # Query must succeed despite the artifact download error
+        response = client.post("/api/v1/query/ask", json={"query": "test query"})
+
+        assert response.status_code == 200
+        # No artifact text should have been passed —
+        # download failed → empty contents list.
+        call_kwargs = mock_gen.call_args.kwargs
+        assert call_kwargs["plan_artifacts_text"] is None

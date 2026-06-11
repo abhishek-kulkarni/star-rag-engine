@@ -8,9 +8,10 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.logging import telemetry
 from app.core.security import get_current_user
-from app.models.document import DocumentChunk
+from app.models.document import Document, DocumentChunk, DocumentType
 from app.models.schemas import QueryResponse, RAGQueryRequest
 from app.services.llm_service import llm_service
+from app.services.storage_service import storage_service
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -73,14 +74,47 @@ async def ask_question(
         {"id": chunk.id, "text_content": chunk.text_content} for chunk in chunks
     ]
 
-    # 4. Generate STAR Answer via Gemini Orchestrator
+    # 4. Retrieve and Inject Plan Artifacts (Grounding Instructions)
+
+    plan_artifacts = (
+        db
+        .query(Document)
+        .filter(
+            Document.user_id == current_user,
+            Document.doc_type == DocumentType.PLAN_ARTIFACT,
+        )
+        .all()
+    )
+
+    plan_text = ""
+    if plan_artifacts:
+        logger.info(
+            f"Injecting {len(plan_artifacts)} plan artifacts for user {current_user}"
+        )
+        # Download and concatenate artifact contents (txt only for now for simplicity)
+        # Note: In production, we'd cache these or use a vector store if they get large
+        contents = []
+        for artifact in plan_artifacts:
+            try:
+                # We assume plan artifacts are small enough to fit in memory
+                content = await storage_service.download_file(artifact.minio_raw_uri)
+                contents.append(content.decode("utf-8"))
+            except Exception as e:
+                logger.warning(
+                    f"Failed to load plan artifact {artifact.filename}: {str(e)}"
+                )
+
+        plan_text = "\n---\n".join(contents)
+
+    # 5. Generate STAR Answer via Gemini Orchestrator
     try:
         answer = await llm_service.generate_star_answer(
             query=request.query,
             retrieved_chunks=retrieved_chunks,
+            plan_artifacts_text=plan_text if plan_text else None,
         )
 
-        # 5. Track Telemetry (Latency)
+        # 6. Track Telemetry (Latency)
         duration = time.perf_counter() - start_time
         logger.info(f"STAR Answer generated for {current_user} in {duration:.2f}s")
         telemetry.track_query(duration)

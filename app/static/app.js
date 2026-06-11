@@ -109,8 +109,10 @@ class Dashboard {
     async handleUpload(file) {
         if (!file) return;
         
+        const docType = document.querySelector('input[name="doc-type"]:checked').value;
         const formData = new FormData();
         formData.append('file', file);
+        formData.append('doc_type', docType);
 
         try {
             const res = await fetch(`${API_BASE}/upload`, { 

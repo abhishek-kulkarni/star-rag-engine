@@ -2,7 +2,7 @@ import logging
 from typing import Annotated
 
 import kombu.exceptions
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -21,6 +21,7 @@ async def upload_document(
     file: Annotated[UploadFile, File(...)],
     current_user: Annotated[str, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
+    doc_type: Annotated[DocumentType, Form()] = DocumentType.STANDARD_DOC,
 ):
     """
     Handles multi-tenant document upload and triggers the ingestion pipeline.
@@ -56,7 +57,7 @@ async def upload_document(
     doc = Document(
         user_id=current_user,
         filename=file.filename,
-        doc_type=DocumentType.STANDARD_DOC,
+        doc_type=doc_type,
         minio_raw_uri=minio_uri,
     )
     db.add(doc)
@@ -69,24 +70,36 @@ async def upload_document(
         f"DB record initialized for {file.filename} (DocID: {doc.id}, JobID: {job.id})"
     )
 
-    # 3. Trigger Celery Pipeline with Dual-Write Mitigation
-    try:
-        start_ingestion_pipeline(job.id, doc.id)
-        logger.info(f"Ingestion pipeline triggered for JobID: {job.id}")
-    except kombu.exceptions.OperationalError as e:
-        # Broker (Redis) is down. Roll back job state to prevent "stuck" jobs.
-        job.status = JobStatus.FAILED
-        job.error_message = "Broker connection failed during ingestion trigger."
+    # 3. Trigger Celery Pipeline with Dual-Write Mitigation (Only for Standard Docs)
+    if doc_type == DocumentType.STANDARD_DOC:
+        try:
+            start_ingestion_pipeline(job.id, doc.id)
+            logger.info(f"Ingestion pipeline triggered for JobID: {job.id}")
+        except kombu.exceptions.OperationalError as e:
+            # Broker (Redis) is down. Roll back job state to prevent "stuck" jobs.
+            job.status = JobStatus.FAILED
+            job.error_message = "Broker connection failed during ingestion trigger."
+            db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Ingestion service unavailable. Please try again later.",
+            ) from e
+    else:
+        # Plan Artifacts skip the parsing/vectorization pipeline.
+        # They are just stored in MinIO for reference/injection.
+        job.status = JobStatus.COMPLETED
         db.commit()
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Ingestion service unavailable. Please try again later.",
-        ) from e
+        logger.info(f"Plan Artifact {file.filename} persisted (JobID: {job.id})")
 
+    message = (
+        "Upload successful. Ingestion started."
+        if doc_type == DocumentType.STANDARD_DOC
+        else "Plan Artifact uploaded successfully."
+    )
     return {
         "document_id": doc.id,
         "job_id": job.id,
-        "message": "Upload successful. Ingestion started.",
+        "message": message,
     }
 
 

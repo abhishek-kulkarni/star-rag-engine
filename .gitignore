@@ -22,7 +22,8 @@ celerybeat-schedule.dat
 celerybeat-schedule-shm
 celerybeat-schedule-wal
 
-# Private Test Data & Artifacts
+# Private Data, Test Datasets & Plan Artifacts
+# These may contain PII or sensitive evaluation data — never commit them.
 /data/*
 !/data/.gitkeep
 
