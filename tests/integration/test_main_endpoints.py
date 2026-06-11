@@ -7,18 +7,18 @@ from app.main import app
 
 def test_root_endpoint():
     """Verify the root welcome message."""
-    with TestClient(app) as client:
-        response = client.get("/")
-        assert response.status_code == 200
-        assert response.json() == {"message": "Welcome to STAR RAG Engine"}
+    client = TestClient(app)
+    response = client.get("/")
+    assert response.status_code == 200
+    assert response.json() == {"message": "Welcome to STAR RAG Engine"}
 
 
 def test_health_check_endpoint():
     """Verify the health check returns healthy status."""
-    with TestClient(app) as client:
-        response = client.get("/health")
-        assert response.status_code == 200
-        assert response.json() == {"status": "healthy"}
+    client = TestClient(app)
+    response = client.get("/health")
+    assert response.status_code == 200
+    assert response.json() == {"status": "healthy"}
 
 
 def test_lifespan_initialization():
