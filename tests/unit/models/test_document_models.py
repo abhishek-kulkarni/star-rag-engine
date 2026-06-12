@@ -17,6 +17,7 @@ def test_models_exist():
         filename="test.pdf",
         doc_type=DocumentType.STANDARD_DOC,
         minio_raw_uri="s3://test",
+        content_hash="mock_hash_123",
     )
     assert doc.user_id == "user_123"
 

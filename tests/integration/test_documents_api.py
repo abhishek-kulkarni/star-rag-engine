@@ -23,6 +23,12 @@ def override_get_current_user():
 def mock_db():
     """Provides a mocked database session."""
     session = MagicMock(spec=Session)
+
+    # Default query mock to return None for duplicate checks
+    query_mock = MagicMock()
+    query_mock.filter.return_value.first.return_value = None
+    session.query.return_value = query_mock
+
     app.dependency_overrides[get_db] = lambda: session
     app.dependency_overrides[get_current_user] = override_get_current_user
     yield session

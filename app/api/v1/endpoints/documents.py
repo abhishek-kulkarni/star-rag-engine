@@ -22,6 +22,7 @@ async def upload_document(
     current_user: Annotated[str, Depends(get_current_user)],
     db: Annotated[Session, Depends(get_db)],
     doc_type: Annotated[DocumentType, Form()] = DocumentType.STANDARD_DOC,
+    overwrite: Annotated[bool, Form()] = False,
 ):
     """
     Handles multi-tenant document upload and triggers the ingestion pipeline.
@@ -37,6 +38,74 @@ async def upload_document(
         )
 
     content = await file.read()
+    import hashlib
+
+    content_hash = hashlib.sha256(content).hexdigest()
+
+    # Check for duplicate content hash
+    duplicate_content = (
+        db
+        .query(Document)
+        .filter(
+            Document.user_id == current_user,
+            Document.content_hash == content_hash,
+        )
+        .first()
+    )
+    if duplicate_content and not overwrite:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Upload failed: The contents of this file are identical to "
+                f"an existing document named '{duplicate_content.filename}'. "
+                f"Select the overwrite option to replace it."
+            ),
+        )
+
+    # Check for duplicate filename
+    duplicate_filename = (
+        db
+        .query(Document)
+        .filter(Document.user_id == current_user, Document.filename == file.filename)
+        .first()
+    )
+    if duplicate_filename and not overwrite:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Document with filename '{file.filename}' already exists. "
+                f"Select the overwrite option to replace it."
+            ),
+        )
+
+    # If overwrite is enabled, clean up any duplicates before saving the new document
+    if overwrite:
+        existing_docs = (
+            db
+            .query(Document)
+            .filter(
+                Document.user_id == current_user,
+                (Document.filename == file.filename)
+                | (Document.content_hash == content_hash),
+            )
+            .all()
+        )
+        for doc in existing_docs:
+            try:
+                await storage_service.delete_file(doc.minio_raw_uri)
+            except Exception as e:
+                logger.error(
+                    f"Failed to delete file {doc.minio_raw_uri} "
+                    f"from storage during overwrite: {e}"
+                )
+            db.delete(doc)
+        if existing_docs:
+            db.commit()
+            logger.info(
+                f"Overwrote {len(existing_docs)} existing document(s) "
+                f"for user {current_user}"
+            )
+
     try:
         minio_uri = await storage_service.upload_file(
             filename=file.filename,
@@ -59,6 +128,7 @@ async def upload_document(
         filename=file.filename,
         doc_type=doc_type,
         minio_raw_uri=minio_uri,
+        content_hash=content_hash,
     )
     db.add(doc)
     db.flush()  # Extract the auto-incremented doc.id

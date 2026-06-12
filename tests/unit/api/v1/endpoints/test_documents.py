@@ -38,6 +38,7 @@ async def test_upload_plan_artifact_unit():
     mock_file.read.return_value = b"test content"
 
     mock_db = MagicMock()
+    mock_db.query.return_value.filter.return_value.first.return_value = None
 
     with (
         patch(
