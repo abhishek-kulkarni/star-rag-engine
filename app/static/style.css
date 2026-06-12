@@ -232,6 +232,59 @@ h1 {
     font-weight: 600;
 }
 
+.overwrite-selector {
+    display: flex;
+    margin-top: 1rem;
+    justify-content: center;
+}
+
+.checkbox-container {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+    font-size: 0.9rem;
+    color: var(--text-muted);
+    transition: color 0.2s ease;
+}
+
+.checkbox-container:hover {
+    color: var(--text);
+}
+
+.checkbox-container input[type="checkbox"] {
+    appearance: none;
+    width: 1.25rem;
+    height: 1.25rem;
+    border: 2px solid var(--border);
+    border-radius: 0.25rem;
+    cursor: pointer;
+    position: relative;
+    transition: all 0.2s ease;
+}
+
+.checkbox-container input[type="checkbox"]:checked {
+    border-color: var(--primary);
+    box-shadow: 0 0 10px var(--primary-glow);
+    background: var(--primary);
+}
+
+.checkbox-container input[type="checkbox"]:checked::after {
+    content: '✓';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: white;
+    font-size: 0.8rem;
+    font-weight: bold;
+}
+
+.checkbox-container input[type="checkbox"]:checked + .checkbox-label {
+    color: var(--primary);
+    font-weight: 600;
+}
+
 /* Job List */
 .job-item {
     margin-top: 1.5rem;

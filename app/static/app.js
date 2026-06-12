@@ -110,9 +110,11 @@ class Dashboard {
         if (!file) return;
         
         const docType = document.querySelector('input[name="doc-type"]:checked').value;
+        const overwrite = document.getElementById('overwrite-checkbox').checked;
         const formData = new FormData();
         formData.append('file', file);
         formData.append('doc_type', docType);
+        formData.append('overwrite', overwrite ? 'true' : 'false');
 
         try {
             const res = await fetch(`${API_BASE}/upload`, { 
@@ -120,12 +122,18 @@ class Dashboard {
                 body: formData 
             });
             
-            if (!res.ok) throw new Error('Upload failed');
+            if (!res.ok) {
+                if (res.status === 409) {
+                    const err = await res.json();
+                    throw new Error(err.detail || 'Duplicate document detected.');
+                }
+                throw new Error('Upload failed. Please try again.');
+            }
             
             // Refresh list to show the new "PENDING" job immediately
             await this.refreshJobs();
         } catch (e) {
-            alert('Upload failed. Please try again.');
+            alert(e.message);
             console.error(e);
         }
     }
