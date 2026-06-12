@@ -39,6 +39,7 @@ class Document(Base):
     filename: Mapped[str] = mapped_column(String(255), nullable=False)
     doc_type: Mapped[DocumentType] = mapped_column(Enum(DocumentType), nullable=False)
     minio_raw_uri: Mapped[str] = mapped_column(String(512), nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )
